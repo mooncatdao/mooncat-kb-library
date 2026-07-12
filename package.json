@@ -1,0 +1,23 @@
+{
+  "name": "mooncat-kb-library",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "generate:kb": "node scripts/generate-kb.mjs",
+    "predev": "npm run generate:kb",
+    "dev": "vite",
+    "prebuild": "npm run generate:kb",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "dompurify": "^3.2.6",
+    "markdown-it": "^14.1.0"
+  },
+  "devDependencies": {
+    "@types/markdown-it": "^14.1.2",
+    "typescript": "^5.8.3",
+    "vite": "^6.3.5"
+  }
+}
