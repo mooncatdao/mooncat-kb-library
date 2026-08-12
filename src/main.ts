@@ -228,6 +228,93 @@ function labelFor(key: string) {
 function looksLikePath(value: string) {
   return /^(docs|data|examples)\/.+\.(md|json)$/i.test(value);
 }
+
+type JsonRecord = Record<string, unknown>;
+
+function isPlainRecord(value: unknown): value is JsonRecord {
+  if (value === null || typeof value !== "object" || Array.isArray(value))
+    return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function isSimpleScalar(value: unknown): value is string | number | boolean {
+  return ["string", "number", "boolean"].includes(typeof value);
+}
+
+function isSimpleRecordValue(value: unknown) {
+  return (
+    value === null ||
+    isSimpleScalar(value) ||
+    (Array.isArray(value) && value.every((item) => item === null || isSimpleScalar(item)))
+  );
+}
+
+function recordShape(record: JsonRecord) {
+  return Object.keys(record).sort().join("\u0000");
+}
+
+function isExpandedRecordArray(value: unknown[]): value is JsonRecord[] {
+  if (value.length === 0 || value.length > 25 || !value.every(isPlainRecord))
+    return false;
+  const shape = recordShape(value[0]);
+  return (
+    shape.length > 0 &&
+    value.every(
+      (record) =>
+        recordShape(record) === shape &&
+        Object.values(record).every(isSimpleRecordValue),
+    )
+  );
+}
+
+function headingField(record: JsonRecord) {
+  const preferred = ["title", "name", "key", "id", "label"];
+  return preferred.find((candidate) => {
+    const key = Object.keys(record).find((entry) => entry.toLowerCase() === candidate);
+    const value = key ? record[key] : undefined;
+    return isSimpleScalar(value) && String(value).trim().length > 0;
+  });
+}
+
+function semanticField(key: string) {
+  const normalized = key.toLowerCase().replace(/[-_\s]/g, "");
+  if (["purpose", "description", "summary"].includes(normalized)) return "descriptive";
+  if (["guardrail", "guardrails", "limitation", "limitations", "note", "notes"].includes(normalized))
+    return "caution";
+  if (["command", "commands"].includes(normalized)) return "command";
+  if (normalized === "status") return "status";
+  return "";
+}
+
+function recordFieldMarkup(key: string, value: unknown, depth: number) {
+  const semantic = semanticField(key);
+  const classes = ["json-record-field", semantic, typeof value === "object" && value !== null ? "complex" : ""]
+    .filter(Boolean)
+    .join(" ");
+  const rendered = valueMarkup(value, depth + 1);
+  const valueMarkupWithSemantics =
+    semantic === "status" && isSimpleScalar(value)
+      ? `<span class="json-status">${rendered}</span>`
+      : semantic === "command"
+        ? `<div class="json-command">${rendered}</div>`
+        : rendered;
+  return `<section class="${classes}"><h3>${labelFor(key)}</h3><div>${valueMarkupWithSemantics}</div></section>`;
+}
+
+function recordMarkup(record: JsonRecord, index: number, depth: number) {
+  const heading = headingField(record);
+  const headingKey = heading
+    ? Object.keys(record).find((key) => key.toLowerCase() === heading)
+    : undefined;
+  const headingValue = headingKey ? record[headingKey] : undefined;
+  const fields = Object.entries(record)
+    .filter(([key]) => key !== headingKey)
+    .map(([key, value]) => recordFieldMarkup(key, value, depth))
+    .join("");
+  return `<article class="json-record"><header class="json-record-heading"><span class="json-record-index">${String(index + 1).padStart(2, "0")}</span><h3>${headingValue !== undefined ? escapeHtml(String(headingValue)) : `Record ${index + 1}`}</h3></header>${fields ? `<div class="json-record-fields">${fields}</div>` : ""}</article>`;
+}
+
 function valueMarkup(value: unknown, depth = 0): string {
   if (value === null) return '<span class="json-null">null</span>';
   if (typeof value === "boolean")
@@ -249,8 +336,10 @@ function valueMarkup(value: unknown, depth = 0): string {
           item === null ||
           ["string", "number", "boolean"].includes(typeof item),
       )
-    )
+      )
       return `<ul class="primitive-list">${value.map((item) => `<li>${valueMarkup(item, depth + 1)}</li>`).join("")}</ul>`;
+    if (isExpandedRecordArray(value))
+      return `<div class="json-record-list">${value.map((record, index) => recordMarkup(record, index, depth)).join("")}</div>`;
     return `<div class="json-array">${value.map((item, index) => `<details ${depth < 1 ? "open" : ""}><summary>ITEM ${index + 1}</summary>${valueMarkup(item, depth + 1)}</details>`).join("")}</div>`;
   }
   const entries = Object.entries(value as Record<string, unknown>);

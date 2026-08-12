@@ -917,6 +917,149 @@ p {
 .json-array summary { color: #ffcc88; cursor: pointer; font-family: Antonio, sans-serif; }
 .json-path { font-family: ui-monospace, monospace; }
 
+.json-record-list {
+  display: grid;
+  max-width: 900px;
+  gap: 10px;
+}
+
+.json-record {
+  min-width: 0;
+  padding: 0.75rem 0.9rem;
+  border-left: 6px solid var(--bluey);
+  background: #120d19;
+}
+
+.json-record-heading {
+  display: flex;
+  min-width: 0;
+  padding-bottom: 0.45rem;
+  align-items: baseline;
+  gap: 0.7rem;
+  border-bottom: 1px solid #493555;
+}
+
+.json-record-heading h3 {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--african-violet);
+  font-size: 1.22rem;
+  line-height: 1.1;
+  text-transform: none;
+}
+
+.json-record-index {
+  flex: 0 0 auto;
+  color: var(--orange);
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+}
+
+.json-record-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 7px;
+  padding-top: 0.6rem;
+}
+
+.json-record-field {
+  min-width: 0;
+  padding: 0.48rem 0.6rem;
+  overflow-wrap: anywhere;
+  border-left: 3px solid #493555;
+  background: #1a1222;
+}
+
+.json-record-field h3 {
+  margin: 0 0 0.25rem;
+  color: #c7afd9;
+  font-size: 0.68rem;
+  letter-spacing: 0.07em;
+  line-height: 1.1;
+  text-transform: uppercase;
+}
+
+.json-record-field.descriptive {
+  grid-column: 1 / -1;
+  border-left-color: var(--gold);
+  background: #21192a;
+}
+
+.json-record-field.descriptive h3 {
+  color: var(--gold);
+}
+
+.json-record-field.caution {
+  border-left-color: var(--red);
+  background: #21151c;
+}
+
+.json-record-field.caution h3 {
+  color: #ff9aa5;
+}
+
+.json-record-field.command {
+  border-left-color: var(--butterscotch);
+}
+
+.json-command {
+  display: block;
+  overflow-wrap: anywhere;
+  color: var(--butterscotch);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.82em;
+}
+
+.json-command .primitive-list {
+  padding-left: 1.1rem;
+}
+
+.json-command .json-string,
+.json-command .json-number,
+.json-command .json-bool,
+.json-command .json-null {
+  color: inherit;
+  font-family: inherit;
+}
+
+.json-record-field.status {
+  align-self: start;
+  border-left-color: var(--bluey);
+}
+
+.json-status {
+  display: inline-block;
+  max-width: 100%;
+  padding: 0.13rem 0.48rem;
+  overflow-wrap: anywhere;
+  border-radius: 100vmax;
+  background: var(--bluey);
+  color: #000;
+  font-size: 0.78rem;
+  line-height: 1.2;
+}
+
+.json-status .json-string,
+.json-status .json-number,
+.json-status .json-bool {
+  color: inherit;
+}
+
+@media (max-width: 760px) {
+  .json-record {
+    padding: 0.65rem;
+  }
+
+  .json-record-fields {
+    display: block;
+  }
+
+  .json-record-field {
+    margin-top: 7px;
+  }
+}
+
 .error-state {
   max-width: 680px;
   padding: 20px;
