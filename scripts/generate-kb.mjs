@@ -10,6 +10,7 @@ const supportedExtensions = new Set(['.md', '.json', '.txt']);
 const rootFiles = new Set(['README.md', 'llms.txt']);
 const allowedRoots = new Set(['docs', 'data', 'examples']);
 const excludedNames = new Set(['result.md', 'agents.md', 'references', 'scripts', '.git', 'node_modules']);
+const maxSearchTextLength = 24000;
 
 if (!existsSync(kbRoot)) {
   console.error(`MoonCat KB was not found at ${kbRoot}. Set MCKB_PATH to the KB checkout.`);
@@ -66,6 +67,52 @@ function sourceCommit() {
   }
 }
 
+function normalizeSearchText(value) {
+  return value.replace(/\s+/g, ' ').trim();
+}
+
+function markdownSearchText(value) {
+  return normalizeSearchText(
+    value
+      .replace(/```[^\n]*\n?/g, ' ')
+      .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
+      .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+      .replace(/[`*_>#~|]/g, ' '),
+  );
+}
+
+function jsonSearchText(value, terms = []) {
+  if (value === null) {
+    terms.push('null');
+  } else if (Array.isArray(value)) {
+    value.forEach((item) => jsonSearchText(item, terms));
+  } else if (typeof value === 'object') {
+    Object.entries(value).forEach(([key, item]) => {
+      terms.push(key);
+      jsonSearchText(item, terms);
+    });
+  } else {
+    terms.push(String(value));
+  }
+  return terms;
+}
+
+function searchTextFor(file) {
+  const source = readFileSync(join(contentRoot, file.path), 'utf8');
+  const text = file.type === 'markdown'
+    ? markdownSearchText(source)
+    : file.type === 'json'
+      ? (() => {
+          try {
+            return normalizeSearchText(jsonSearchText(JSON.parse(source)).join(' '));
+          } catch {
+            return normalizeSearchText(source);
+          }
+        })()
+      : normalizeSearchText(source);
+  return text.slice(0, maxSearchTextLength);
+}
+
 rmSync(outputRoot, { recursive: true, force: true });
 mkdirSync(contentRoot, { recursive: true });
 const tree = makeFolder('', '');
@@ -99,5 +146,15 @@ writeFileSync(join(outputRoot, 'manifest.json'), `${JSON.stringify({
   source: { path: relative(repoRoot, kbRoot).split(sep).join('/'), commit: sourceCommit() },
   fileCount: files.length,
   tree,
+}, null, 2)}\n`);
+writeFileSync(join(outputRoot, 'search-index.json'), `${JSON.stringify({
+  version: 1,
+  fileCount: files.length,
+  entries: files.map((file) => ({
+    path: file.path,
+    title: file.title,
+    type: file.type,
+    text: searchTextFor(file),
+  })),
 }, null, 2)}\n`);
 console.log(`Generated ${files.length} KB files from ${kbRoot}`);

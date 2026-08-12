@@ -27,6 +27,17 @@ type Manifest = {
   source: { commit: string | null };
   tree: FolderNode;
 };
+type SearchEntry = {
+  path: string;
+  title: string;
+  type: FileType;
+  text: string;
+};
+type SearchResult = {
+  entry: SearchEntry;
+  score: number;
+  matchedTokens: number;
+};
 
 const app = document.querySelector<HTMLDivElement>("#app");
 const markdown = new MarkdownIt({
@@ -37,6 +48,10 @@ const markdown = new MarkdownIt({
 let manifest: Manifest | null = null;
 let activePath = "";
 let rawMode = false;
+let searchIndex: SearchEntry[] | null = null;
+let searchIndexState: "idle" | "loading" | "ready" | "failed" = "idle";
+let searchIndexPromise: Promise<void> | null = null;
+let searchQuery = "";
 
 const escapeHtml = (value: string) =>
   value.replace(
@@ -53,6 +68,127 @@ const escapeHtml = (value: string) =>
 const routeFor = (path: string) => `#/file/${encodeURIComponent(path)}`;
 const formatSize = (size: number) =>
   size < 1024 ? `${size} B` : `${(size / 1024).toFixed(1)} KB`;
+
+function searchTokens(query: string) {
+  return [...new Set(query.toLocaleLowerCase().trim().split(/\s+/).filter(Boolean))];
+}
+
+function searchResults(query: string): SearchResult[] {
+  const tokens = searchTokens(query);
+  if (!tokens.length || !searchIndex) return [];
+  return searchIndex
+    .map((entry) => {
+      const title = entry.title.toLocaleLowerCase();
+      const path = entry.path.toLocaleLowerCase();
+      const text = entry.text.toLocaleLowerCase();
+      let score = 0;
+      let matchedTokens = 0;
+      for (const token of tokens) {
+        let matched = false;
+        if (title.includes(token)) {
+          score += 100;
+          matched = true;
+        }
+        if (path.includes(token)) {
+          score += 60;
+          matched = true;
+        }
+        if (text.includes(token)) {
+          score += 15;
+          matched = true;
+        }
+        if (matched) matchedTokens += 1;
+      }
+      return { entry, score, matchedTokens };
+    })
+    .filter((result) => result.matchedTokens > 0)
+    .sort(
+      (left, right) =>
+        right.matchedTokens - left.matchedTokens ||
+        right.score - left.score ||
+        left.entry.title.localeCompare(right.entry.title) ||
+        left.entry.path.localeCompare(right.entry.path),
+    )
+    .slice(0, 25);
+}
+
+function searchSnippet(entry: SearchEntry, query: string) {
+  const text = entry.text;
+  const lowerText = text.toLocaleLowerCase();
+  const positions = searchTokens(query)
+    .map((token) => lowerText.indexOf(token))
+    .filter((position) => position >= 0);
+  if (!positions.length) return "";
+  const position = Math.min(...positions);
+  const start = Math.max(0, position - 68);
+  const end = Math.min(text.length, position + 150);
+  return `${start ? "…" : ""}${text.slice(start, end)}${end < text.length ? "…" : ""}`;
+}
+
+function searchResultsMarkup() {
+  const query = searchQuery.trim();
+  if (!query) return "";
+  if (searchIndexState === "idle" || searchIndexState === "loading")
+    return '<p class="search-message">Loading searchable archive…</p>';
+  if (searchIndexState === "failed")
+    return '<p class="search-message search-error">Search index unavailable. Archive browsing remains available.</p>';
+  const results = searchResults(query);
+  if (!results.length)
+    return `<p class="search-message">No records match “${escapeHtml(query)}”.</p>`;
+  return `<p class="search-result-count">${results.length} result${results.length === 1 ? "" : "s"}</p><ol class="search-results">${results
+    .map(({ entry }) => {
+      const snippet = searchSnippet(entry, query);
+      return `<li><a data-search-result href="${routeFor(entry.path)}"><strong>${escapeHtml(entry.title)}</strong><span>${escapeHtml(entry.path)} · ${escapeHtml(entry.type)}</span>${snippet ? `<small>${escapeHtml(snippet)}</small>` : ""}</a></li>`;
+    })
+    .join("")}</ol>`;
+}
+
+function searchControlMarkup() {
+  return `<section class="library-search" role="search"><label for="library-search-input">Search archive</label><div class="library-search-controls"><input id="library-search-input" type="search" autocomplete="off" placeholder="Title, path, or content" value="${escapeHtml(searchQuery)}"/><button type="button" data-search-clear aria-label="Clear archive search">Clear</button></div><div class="search-results-panel" data-search-results aria-live="polite">${searchResultsMarkup()}</div></section>`;
+}
+
+function updateSearchResults() {
+  const results = document.querySelector<HTMLElement>("[data-search-results]");
+  if (results) results.innerHTML = searchResultsMarkup();
+}
+
+function clearSearch(focus = false) {
+  searchQuery = "";
+  const input = document.querySelector<HTMLInputElement>("#library-search-input");
+  if (input) {
+    input.value = "";
+    if (focus) input.focus();
+  }
+  updateSearchResults();
+}
+
+async function loadSearchIndex() {
+  if (searchIndexPromise) return searchIndexPromise;
+  searchIndexState = "loading";
+  searchIndexPromise = (async () => {
+    try {
+      const response = await fetch("./kb/search-index.json");
+      if (!response.ok) throw new Error(`Request returned ${response.status}`);
+      const payload = (await response.json()) as { entries?: unknown };
+      if (!Array.isArray(payload.entries)) throw new Error("Invalid search index");
+      searchIndex = payload.entries.filter(
+        (entry): entry is SearchEntry =>
+          typeof entry === "object" &&
+          entry !== null &&
+          typeof (entry as SearchEntry).path === "string" &&
+          typeof (entry as SearchEntry).title === "string" &&
+          typeof (entry as SearchEntry).type === "string" &&
+          typeof (entry as SearchEntry).text === "string",
+      );
+      searchIndexState = "ready";
+    } catch {
+      searchIndex = null;
+      searchIndexState = "failed";
+    }
+    updateSearchResults();
+  })();
+  return searchIndexPromise;
+}
 
 function allFiles(node: TreeNode): FileNode[] {
   return node.kind === "file" ? [node] : node.children.flatMap(allFiles);
@@ -115,7 +251,7 @@ function shell(content: string, title = "MoonCat Knowledge Archive") {
     )
     .join("");
   const library = manifest
-    ? `<aside class="library-browser" aria-label="Knowledge archive browser"><details class="library-drawer" open><summary><span>Library index</span><small>${fileCount} records</small></summary><div class="library-tree-scroll">${renderTree(manifest.tree)}</div></details></aside>`
+    ? `<aside class="library-browser" aria-label="Knowledge archive browser">${searchControlMarkup()}<details class="library-drawer" open><summary><span>Library index</span><small>${fileCount} records</small></summary><div class="library-tree-scroll">${renderTree(manifest.tree)}</div></details></aside>`
     : "";
   return `<section class="wrap-standard" id="column-3">
     <div class="wrap shell-header-row">
@@ -396,6 +532,27 @@ function bindPage() {
         void render(true);
       }),
     );
+  document
+    .querySelector<HTMLInputElement>("#library-search-input")
+    ?.addEventListener("input", (event) => {
+      searchQuery = (event.currentTarget as HTMLInputElement).value;
+      updateSearchResults();
+    });
+  document
+    .querySelector<HTMLInputElement>("#library-search-input")
+    ?.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        clearSearch();
+        (event.currentTarget as HTMLInputElement).blur();
+      }
+    });
+  document
+    .querySelector<HTMLButtonElement>("[data-search-clear]")
+    ?.addEventListener("click", () => clearSearch(true));
+  document
+    .querySelectorAll<HTMLAnchorElement>("[data-search-result]")
+    .forEach((result) => result.addEventListener("click", () => clearSearch()));
 }
 
 async function render(preserveMode = false) {
@@ -426,7 +583,17 @@ async function start() {
   } catch {
     manifest = null;
   }
+  void loadSearchIndex();
   window.addEventListener("hashchange", () => void render());
+  window.addEventListener("keydown", (event) => {
+    if (
+      event.key.toLocaleLowerCase() === "k" &&
+      (event.metaKey || event.ctrlKey)
+    ) {
+      event.preventDefault();
+      document.querySelector<HTMLInputElement>("#library-search-input")?.focus();
+    }
+  });
   await render();
 }
 
