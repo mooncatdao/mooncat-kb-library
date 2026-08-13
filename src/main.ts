@@ -1,5 +1,11 @@
 import DOMPurify from "dompurify";
 import MarkdownIt from "markdown-it";
+import {
+  HUMAN_GUIDE_PATH,
+  LIBRARY_EXAMPLES,
+  LIBRARY_TOPICS,
+  type LibraryLink,
+} from "./library-sections";
 import "./style.css";
 
 type FileType = "markdown" | "json" | "text";
@@ -38,6 +44,8 @@ type SearchResult = {
   score: number;
   matchedTokens: number;
 };
+type SearchScope = "all" | "guides" | "data" | "examples";
+type HumanSection = "guide" | "topics" | "examples" | "archive";
 
 const app = document.querySelector<HTMLDivElement>("#app");
 const markdown = new MarkdownIt({
@@ -52,6 +60,7 @@ let searchIndex: SearchEntry[] | null = null;
 let searchIndexState: "idle" | "loading" | "ready" | "failed" = "idle";
 let searchIndexPromise: Promise<void> | null = null;
 let searchQuery = "";
+let searchScope: SearchScope = "all";
 
 const escapeHtml = (value: string) =>
   value.replace(
@@ -66,6 +75,7 @@ const escapeHtml = (value: string) =>
       })[char] ?? char,
   );
 const routeFor = (path: string) => `#/file/${encodeURIComponent(path)}`;
+const routeForSection = (section: HumanSection) => `#/${section}`;
 const formatSize = (size: number) =>
   size < 1024 ? `${size} B` : `${(size / 1024).toFixed(1)} KB`;
 
@@ -73,10 +83,20 @@ function searchTokens(query: string) {
   return [...new Set(query.toLocaleLowerCase().trim().split(/\s+/).filter(Boolean))];
 }
 
+function entryMatchesScope(entry: SearchEntry) {
+  if (searchScope === "guides")
+    return entry.type === "markdown" &&
+      (entry.path === "README.md" || entry.path === "CONTRIBUTING.md" || entry.path.startsWith("docs/"));
+  if (searchScope === "data") return entry.path.startsWith("data/");
+  if (searchScope === "examples") return entry.path.startsWith("examples/");
+  return true;
+}
+
 function searchResults(query: string): SearchResult[] {
   const tokens = searchTokens(query);
   if (!tokens.length || !searchIndex) return [];
   return searchIndex
+    .filter(entryMatchesScope)
     .map((entry) => {
       const title = entry.title.toLocaleLowerCase();
       const path = entry.path.toLocaleLowerCase();
@@ -97,6 +117,7 @@ function searchResults(query: string): SearchResult[] {
           score += 15;
           matched = true;
         }
+        if (searchScope === "all" && entry.type === "markdown") score += 2;
         if (matched) matchedTokens += 1;
       }
       return { entry, score, matchedTokens };
@@ -144,7 +165,13 @@ function searchResultsMarkup() {
 }
 
 function searchControlMarkup() {
-  return `<section class="library-search" role="search"><label for="library-search-input">Search archive</label><div class="library-search-controls"><input id="library-search-input" type="search" autocomplete="off" placeholder="Title, path, or content" value="${escapeHtml(searchQuery)}"/><button type="button" data-search-clear aria-label="Clear archive search">Clear</button></div><div class="search-results-panel" data-search-results aria-live="polite">${searchResultsMarkup()}</div></section>`;
+  const scopes: [SearchScope, string][] = [
+    ["all", "All"],
+    ["guides", "Guides"],
+    ["data", "Data"],
+    ["examples", "Examples"],
+  ];
+  return `<section class="library-search" role="search"><label for="library-search-input">Search archive</label><div class="library-search-controls"><input id="library-search-input" type="search" autocomplete="off" placeholder="Title, path, or content" value="${escapeHtml(searchQuery)}"/><button type="button" data-search-clear aria-label="Clear archive search">Clear</button></div><div class="search-scopes" aria-label="Search scope">${scopes.map(([scope, label]) => `<button type="button" class="${searchScope === scope ? "selected" : ""}" data-search-scope="${scope}">${label}</button>`).join("")}</div><div class="search-results-panel" data-search-results aria-live="polite">${searchResultsMarkup()}</div></section>`;
 }
 
 function updateSearchResults() {
@@ -207,6 +234,36 @@ function pathFromHash() {
     : "";
 }
 
+function sectionFromHash(): HumanSection | "" {
+  const section = location.hash.slice(2);
+  return ["guide", "topics", "examples", "archive"].includes(section)
+    ? (section as HumanSection)
+    : "";
+}
+
+function linkMarkup(link: LibraryLink, className = "curated-link") {
+  const file = findFile(link.path);
+  if (!file) return "";
+  return `<a class="${className}" href="${routeFor(link.path)}"><strong>${escapeHtml(link.label)}</strong><small>${escapeHtml(link.description)}</small><span>${escapeHtml(file.path)}</span></a>`;
+}
+
+function guideDestination() {
+  return findFile(HUMAN_GUIDE_PATH)
+    ? HUMAN_GUIDE_PATH
+    : findFile("README.md")
+      ? "README.md"
+      : "";
+}
+
+function humanSectionTitle(section: HumanSection) {
+  return {
+    guide: "Human Guide",
+    topics: "Explore by Goal",
+    examples: "Executable Examples",
+    archive: "Technical Archive",
+  }[section];
+}
+
 function internalPath(href: string, fromPath: string) {
   if (/^(https?:|mailto:|#|\/)/i.test(href)) return null;
   const bare = href.split("#")[0].split("?")[0];
@@ -225,17 +282,16 @@ function internalPath(href: string, fromPath: string) {
 
 function shell(content: string, title = "MoonCat Knowledge Archive") {
   const fileCount = manifest?.fileCount ?? 0;
+  const guidePath = guideDestination();
+  const guideHref = guidePath ? routeFor(guidePath) : routeForSection("guide");
   const navItems = [
-    ["Home", ""],
-    ["Docs", "docs/overview.md"],
-    ["Data", "data/agent-index.json"],
-    ["Examples", "examples/rescue-mining-widget/README.md"],
+    ["Home", "#/"],
+    ["Guide", guideHref],
+    ["Topics", routeForSection("topics")],
+    ["Examples", routeForSection("examples")],
   ];
   const nav = navItems
-    .map(([label, path], index) => {
-      const href = path && findFile(path) ? routeFor(path) : "#/";
-      return `<a href="${href}"><span>0${index + 1}</span>${label}</a>`;
-    })
+    .map(([label, href], index) => `<a href="${href}"><span>0${index + 1}</span>${label}</a>`)
     .join("");
   const cascade = [
     ["93", "1853", "24109", "7024", "322", "4149", "86"],
@@ -251,7 +307,7 @@ function shell(content: string, title = "MoonCat Knowledge Archive") {
     )
     .join("");
   const library = manifest
-    ? `<aside class="library-browser" aria-label="Knowledge archive browser">${searchControlMarkup()}<details class="library-drawer" open><summary><span>Library index</span><small>${fileCount} records</small></summary><div class="library-tree-scroll">${renderTree(manifest.tree)}</div></details></aside>`
+    ? `<aside class="library-browser" aria-label="Knowledge archive browser">${searchControlMarkup()}<details class="library-drawer" open><summary><span>Technical archive · all records</span><small>${fileCount}</small></summary><div class="library-tree-scroll">${renderTree(manifest.tree)}</div></details></aside>`
     : "";
   return `<section class="wrap-standard" id="column-3">
     <div class="wrap shell-header-row">
@@ -271,10 +327,10 @@ function shell(content: string, title = "MoonCat Knowledge Archive") {
     <div class="wrap" id="gap">
       <aside class="left-frame" aria-label="Archive sections">
         <div class="frame-panels">
-          <a class="panel-3" href="#/">03<span class="hop">-HOME</span></a>
-          <a class="panel-4" href="${findFile("docs/overview.md") ? routeFor("docs/overview.md") : "#/"}">04<span class="hop">-DOCS</span></a>
-          <a class="panel-5" href="${findFile("data/agent-index.json") ? routeFor("data/agent-index.json") : "#/"}">05<span class="hop">-DATA</span></a>
-          <a class="panel-6" href="${findFile("examples/rescue-mining-widget/README.md") ? routeFor("examples/rescue-mining-widget/README.md") : "#/"}">06<span class="hop">-EXAMPLES</span></a>
+          <a class="panel-3" href="${guideHref}">03<span class="hop">-GUIDE</span></a>
+          <a class="panel-4" href="${routeForSection("topics")}">04<span class="hop">-TOPICS</span></a>
+          <a class="panel-5" href="${routeForSection("examples")}">05<span class="hop">-EXAMPLES</span></a>
+          <a class="panel-6" href="${routeForSection("archive")}">06<span class="hop">-ARCHIVE</span></a>
           <div class="panel-7">07<span class="hop">-${String(fileCount).padStart(3, "0")}</span></div>
           <div class="panel-8">08<span class="hop">-READ ONLY</span></div>
           <div class="panel-9">09<span class="hop">-ARCHIVE</span></div>
@@ -303,31 +359,54 @@ function renderTree(node: FolderNode, depth = 0): string {
     .join("")}</ul>`;
 }
 
+function curatedCards(links: LibraryLink[], className = "curated-grid") {
+  const cards = links
+    .map((link) => linkMarkup(link, "curated-link"))
+    .filter(Boolean)
+    .join("");
+  return `<div class="${className}">${cards || '<p class="curated-empty">No curated destinations from this group are present in the generated archive.</p>'}</div>`;
+}
+
+function humanPage(section: HumanSection) {
+  const guidePath = guideDestination();
+  const guideLink = guidePath
+    ? `<a class="curated-primary" href="${routeFor(guidePath)}"><strong>Open the human guide</strong><small>${escapeHtml(guidePath)}</small></a>`
+    : '<p class="curated-empty">The human guide is not present in this generated archive. Use the technical archive below.</p>';
+  if (section === "guide")
+    return shell(
+      `<section class="curated-page"><p class="eyebrow">HUMAN ENTRYPOINT // START HERE</p><h1>Using MoonCat KB</h1><p class="curated-lede">A goal-oriented introduction to the archive, its evidence boundaries, and the quickest route to a useful answer.</p><div class="curated-actions">${guideLink}<a class="curated-secondary" href="${routeForSection("topics")}"><strong>Explore by goal</strong><small>Choose a topic without browsing folders.</small></a></div><section class="curated-note"><h2>Read the guide first</h2><p>The guide is the primary human starting point. The complete technical archive remains available as a secondary, file-oriented view.</p></section></section>`,
+      humanSectionTitle(section),
+    );
+  if (section === "topics")
+    return shell(
+      `<section class="curated-page"><p class="eyebrow">HUMAN ENTRYPOINT // TOPICS</p><h1>Explore by goal</h1><p class="curated-lede">Choose a starting point by what you want to understand or build. Each card routes to an existing source document.</p>${curatedCards(LIBRARY_TOPICS)}<div class="curated-actions"><a class="curated-secondary" href="${routeForSection("guide")}"><strong>Read the human guide</strong><small>Get the archive's orientation and boundaries.</small></a><a class="curated-secondary" href="${routeForSection("archive")}"><strong>Open all records</strong><small>Browse the complete generated file tree.</small></a></div></section>`,
+      humanSectionTitle(section),
+    );
+  if (section === "examples")
+    return shell(
+      `<section class="curated-page"><p class="eyebrow">HUMAN ENTRYPOINT // EXAMPLES</p><h1>Executable examples</h1><p class="curated-lede">Small, local examples that demonstrate bounded ways to use the KB without adding a live service or competing dataset.</p>${curatedCards(LIBRARY_EXAMPLES, "curated-grid examples-grid")}<div class="curated-actions"><a class="curated-secondary" href="${routeForSection("guide")}"><strong>Read the human guide</strong><small>Choose a goal before opening an implementation.</small></a><a class="curated-secondary" href="${routeForSection("archive")}"><strong>Open all records</strong><small>Find supporting docs and data in the technical tree.</small></a></div></section>`,
+      humanSectionTitle(section),
+    );
+  return shell(
+    `<section class="curated-page"><p class="eyebrow">SECONDARY VIEW // COMPLETE FILE TREE</p><h1>Technical archive</h1><p class="curated-lede">All generated Markdown, JSON, and text records remain available in the archive browser at left. Use search or the tree when you already know the file or need technical detail.</p><div class="curated-actions"><a class="curated-primary" href="${routeForSection("guide")}"><strong>Return to human guide</strong><small>Start with a goal-oriented route.</small></a><a class="curated-secondary" href="${routeForSection("topics")}"><strong>Browse curated topics</strong><small>Use the human-facing entrypoints.</small></a></div></section>`,
+    humanSectionTitle(section),
+  );
+}
+
 function home() {
-  const cards = [
-    ["Start Here", "README.md", "Library orientation and entry points."],
-    [
-      "Documents",
-      "docs/overview.md",
-      "Explanations, history, source notes, and methods.",
-    ],
-    [
-      "Data Records",
-      "data/agent-index.json",
-      "Canonical and curated machine-readable records.",
-    ],
-    [
-      "Examples",
-      "examples/rescue-mining-widget/README.md",
-      "Small, publishable reference examples.",
-    ],
-  ].filter(([, path]) => findFile(path));
   const source = manifest?.source.commit
     ? `SOURCE COMMIT ${manifest.source.commit.slice(0, 12)}`
     : "SOURCE COMMIT UNAVAILABLE";
   return shell(
-    `<section class="home-hero"><p class="eyebrow">MOONCAT DAO // KNOWLEDGE SYSTEM</p><h1>MoonCat Knowledge Archive</h1><p>A read-only library for the MoonCat technical knowledge base. Browse its explanations and data records without changing the canonical source.</p><div class="home-meta"><span>${manifest?.fileCount ?? 0} PUBLISHABLE RECORDS</span><span>${source}</span></div></section><section class="entry-list" aria-label="Archive entry points">${cards.map(([title, path, text], index) => `<a class="entry-control entry-${index + 1}" href="${routeFor(path)}"><span class="entry-number">0${index + 1}</span><span class="entry-copy"><strong>${title}</strong><small>${text}</small></span><b>Open</b></a>`).join("")}</section><section class="home-note"><h2>Archive protocol</h2><p>The KB distinguishes <strong>docs/</strong> for explanatory context from <strong>data/</strong> for exact canonical or curated data. Incomplete facts remain explicitly marked in the source records.</p></section>`,
+    `<section class="home-hero"><p class="eyebrow">MOONCAT DAO // HUMAN-FIRST KNOWLEDGE SYSTEM</p><h1>MoonCat Knowledge Archive</h1><p>A read-only library for people who want a useful starting point before opening the complete technical record set.</p><div class="home-meta"><span>${manifest?.fileCount ?? 0} PUBLISHABLE RECORDS</span><span>${source}</span></div></section><section class="guide-spotlight"><p class="eyebrow">PRIMARY STARTING POINT</p><h2>Using MoonCat KB</h2><p>Begin with the goal-oriented guide, then follow a curated topic or example into the source-backed archive.</p>${guideLinkMarkup()}<div class="spotlight-links"><a href="${routeForSection("topics")}">Explore by goal <span>→</span></a><a href="${routeForSection("examples")}">Open examples <span>→</span></a><a href="${routeForSection("archive")}">Technical archive <span>→</span></a></div></section><section class="home-topic-preview"><div><p class="eyebrow">CURATED TOPICS</p><h2>Where do you want to go?</h2></div><div class="topic-preview-grid">${LIBRARY_TOPICS.slice(0, 6).map((link) => linkMarkup(link, "topic-preview-link")).filter(Boolean).join("")}</div><a class="curated-secondary" href="${routeForSection("topics")}"><strong>See all topics</strong><small>Browse the complete goal-oriented index.</small></a></section>`,
   );
+}
+
+function guideLinkMarkup() {
+  const path = guideDestination();
+  return path
+    ? `<a class="curated-primary" href="${routeFor(path)}"><strong>Open the human guide</strong><small>${escapeHtml(path)}</small></a>`
+    : '<p class="curated-empty">The guide is unavailable in this generated archive; use the technical archive instead.</p>';
 }
 
 function breadcrumbs(file: FileNode) {
@@ -550,6 +629,15 @@ function bindPage() {
   document
     .querySelector<HTMLButtonElement>("[data-search-clear]")
     ?.addEventListener("click", () => clearSearch(true));
+  document.querySelectorAll<HTMLButtonElement>("[data-search-scope]").forEach((button) =>
+    button.addEventListener("click", () => {
+      searchScope = (button.dataset.searchScope as SearchScope) ?? "all";
+      document.querySelectorAll<HTMLButtonElement>("[data-search-scope]").forEach((scopeButton) => {
+        scopeButton.classList.toggle("selected", scopeButton === button);
+      });
+      updateSearchResults();
+    }),
+  );
   document
     .querySelectorAll<HTMLAnchorElement>("[data-search-result]")
     .forEach((result) => result.addEventListener("click", () => clearSearch()));
@@ -565,7 +653,12 @@ async function render(preserveMode = false) {
     );
     return;
   }
-  app!.innerHTML = activePath ? await filePage(activePath) : home();
+  const section = sectionFromHash();
+  app!.innerHTML = activePath
+    ? await filePage(activePath)
+    : section
+      ? humanPage(section)
+      : home();
   bindPage();
   document
     .querySelector<HTMLElement>("#content")
