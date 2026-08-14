@@ -1,0 +1,66 @@
+name: Deploy MoonCat Knowledge Archive
+
+on:
+  push:
+    branches:
+      - main
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout library
+        uses: actions/checkout@v6
+        with:
+          path: library
+
+      - name: Checkout MoonCat KB
+        uses: actions/checkout@v6
+        with:
+          repository: mooncatdao/mooncat-kb
+          path: mckb
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: library/package-lock.json
+
+      - name: Install dependencies
+        working-directory: library
+        run: npm ci
+
+      - name: Build archive from MoonCat KB
+        working-directory: library
+        env:
+          MCKB_PATH: ../mckb
+        run: npm run build
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: library/dist
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
