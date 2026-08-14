@@ -46,6 +46,14 @@ MCKB_PATH=/path/to/mckb npm run generate:kb
 
 The generated, gitignored `public/kb/` directory contains `manifest.json`, `search-index.json`, and a copied `content/` tree. The search index has one compact entry per published file with its path, title, type, and normalized searchable text; it powers the archive's static client-side search without loading every record at query time. The generator includes only `README.md`, `CONTRIBUTING.md` when present, `llms.txt`, and supported Markdown, JSON, or text files beneath `docs/`, `data/`, and `examples/`. It omits hidden files, development metadata, `references/`, `scripts/`, `AGENTS.md`, `result.md`, and unsupported types. It records the source git commit when available but does not require git metadata.
 
+When the sibling KB provides a valid `data/kb-manifest.json`, the archive
+optionally enriches matching published records and search entries with a
+whitelisted presentation subset: `fileRole`, `topics`, `curationMode`,
+`statuses`, and `sourceBackedStatus`. Hashes, commands, routes, recipes, and
+other internal manifest fields are intentionally excluded. Missing, malformed,
+or unmatched source-manifest metadata is ignored so filesystem-derived archive
+generation and browsing continue normally.
+
 ## V1 limitations
 
 - This is a static, hash-routed presentation layer; it does not edit, authenticate, or call a backend. Search is local to the generated publishable archive index.

@@ -25,6 +25,11 @@ type FileNode = {
   type: FileType;
   size: number;
   modified: string;
+  fileRole?: string;
+  topics?: string[];
+  curationMode?: string;
+  statuses?: string[];
+  sourceBackedStatus?: string;
 };
 type TreeNode = FolderNode | FileNode;
 type Manifest = {
@@ -38,6 +43,11 @@ type SearchEntry = {
   title: string;
   type: FileType;
   text: string;
+  fileRole?: string;
+  topics?: string[];
+  curationMode?: string;
+  statuses?: string[];
+  sourceBackedStatus?: string;
 };
 type SearchResult = {
   entry: SearchEntry;
@@ -79,6 +89,94 @@ const routeForSection = (section: HumanSection) => `#/${section}`;
 const formatSize = (size: number) =>
   size < 1024 ? `${size} B` : `${(size / 1024).toFixed(1)} KB`;
 
+const presentationRoles = new Set([
+  "canonical-data",
+  "documentation",
+  "entrypoint",
+  "example",
+  "generator",
+  "license-notice",
+  "project-metadata",
+  "source-index",
+  "validator",
+  "workflow-data",
+]);
+const presentationCurationModes = new Set(["curated", "generated", "local-policy"]);
+const presentationStatuses = new Set(["curated", "doc", "example", "generated", "script"]);
+const presentationSourceStatuses = new Set([
+  "contains-source-reference",
+  "not-applicable",
+  "registered-source",
+]);
+
+type PresentationCarrier = Pick<
+  SearchEntry,
+  "fileRole" | "topics" | "curationMode" | "statuses" | "sourceBackedStatus"
+>;
+
+function safePresentationMetadata(value: unknown): PresentationCarrier {
+  if (!value || typeof value !== "object") return {};
+  const source = value as Record<string, unknown>;
+  const metadata: PresentationCarrier = {};
+  if (typeof source.fileRole === "string" && presentationRoles.has(source.fileRole))
+    metadata.fileRole = source.fileRole;
+  if (typeof source.curationMode === "string" && presentationCurationModes.has(source.curationMode))
+    metadata.curationMode = source.curationMode;
+  if (typeof source.sourceBackedStatus === "string" && presentationSourceStatuses.has(source.sourceBackedStatus))
+    metadata.sourceBackedStatus = source.sourceBackedStatus;
+  if (Array.isArray(source.topics)) {
+    const topics = [...new Set(source.topics)].filter(
+      (topic): topic is string => typeof topic === "string" && topic.length <= 64,
+    ).slice(0, 8);
+    if (topics.length) metadata.topics = topics;
+  }
+  if (Array.isArray(source.statuses)) {
+    const statuses = [...new Set(source.statuses)].filter(
+      (status): status is string => typeof status === "string" && presentationStatuses.has(status),
+    );
+    if (statuses.length) metadata.statuses = statuses;
+  }
+  return metadata;
+}
+
+function metadataBadges(record: PresentationCarrier) {
+  const roleLabels: Record<string, string> = {
+    "canonical-data": "DATA",
+    documentation: "DOC",
+    entrypoint: "ENTRY",
+    example: "EXAMPLE",
+    generator: "GENERATOR",
+    "license-notice": "LICENSE",
+    "project-metadata": "META",
+    "source-index": "SOURCE",
+    validator: "VALIDATOR",
+    "workflow-data": "WORKFLOW",
+  };
+  const curationLabels: Record<string, string> = {
+    curated: "CURATED",
+    generated: "GENERATED",
+    "local-policy": "LOCAL",
+  };
+  const sourceLabels: Record<string, string> = {
+    "registered-source": "SOURCE",
+    "contains-source-reference": "SOURCE REF",
+  };
+  const badges = [
+    record.fileRole ? roleLabels[record.fileRole] : "",
+    record.curationMode ? curationLabels[record.curationMode] : "",
+    record.sourceBackedStatus ? sourceLabels[record.sourceBackedStatus] : "",
+  ].filter(Boolean);
+  return badges;
+}
+
+function metadataSummary(record: PresentationCarrier) {
+  const safe = safePresentationMetadata(record);
+  const badges = metadataBadges(safe);
+  const topics = safe.topics?.slice(0, 3) ?? [];
+  if (!badges.length && !topics.length) return "";
+  return `<div class="record-metadata">${badges.map((badge) => `<span>${escapeHtml(badge)}</span>`).join("")}${topics.length ? `<small>TOPICS · ${escapeHtml(topics.join(" · "))}</small>` : ""}</div>`;
+}
+
 function searchTokens(query: string) {
   return [...new Set(query.toLocaleLowerCase().trim().split(/\s+/).filter(Boolean))];
 }
@@ -86,9 +184,10 @@ function searchTokens(query: string) {
 function entryMatchesScope(entry: SearchEntry) {
   if (searchScope === "guides")
     return entry.type === "markdown" &&
-      (entry.path === "README.md" || entry.path === "CONTRIBUTING.md" || entry.path.startsWith("docs/"));
-  if (searchScope === "data") return entry.path.startsWith("data/");
-  if (searchScope === "examples") return entry.path.startsWith("examples/");
+      (entry.fileRole === "documentation" || entry.fileRole === "entrypoint" || entry.path === "README.md" || entry.path === "CONTRIBUTING.md" || entry.path.startsWith("docs/"));
+  if (searchScope === "data")
+    return entry.fileRole === "canonical-data" || entry.fileRole === "workflow-data" || entry.path.startsWith("data/");
+  if (searchScope === "examples") return entry.fileRole === "example" || entry.path.startsWith("examples/");
   return true;
 }
 
@@ -117,6 +216,11 @@ function searchResults(query: string): SearchResult[] {
           score += 15;
           matched = true;
         }
+        if (entry.topics?.some((topic) => topic.toLocaleLowerCase().includes(token))) {
+          score += 18;
+          matched = true;
+        }
+        if (entry.fileRole === "documentation" || entry.fileRole === "entrypoint") score += 2;
         if (searchScope === "all" && entry.type === "markdown") score += 2;
         if (matched) matchedTokens += 1;
       }
@@ -159,7 +263,9 @@ function searchResultsMarkup() {
   return `<p class="search-result-count">${results.length} result${results.length === 1 ? "" : "s"}</p><ol class="search-results">${results
     .map(({ entry }) => {
       const snippet = searchSnippet(entry, query);
-      return `<li><a data-search-result href="${routeFor(entry.path)}"><strong>${escapeHtml(entry.title)}</strong><span>${escapeHtml(entry.path)} · ${escapeHtml(entry.type)}</span>${snippet ? `<small>${escapeHtml(snippet)}</small>` : ""}</a></li>`;
+      const badges = metadataBadges(entry);
+      const topicHint = entry.topics?.slice(0, 2).join(" · ");
+      return `<li><a data-search-result href="${routeFor(entry.path)}"><strong>${escapeHtml(entry.title)}</strong><span>${escapeHtml(entry.path)} · ${escapeHtml(entry.type)}${badges.length ? ` · ${escapeHtml(badges.join(" · "))}` : ""}</span>${topicHint ? `<i>${escapeHtml(topicHint)}</i>` : ""}${snippet ? `<small>${escapeHtml(snippet)}</small>` : ""}</a></li>`;
     })
     .join("")}</ol>`;
 }
@@ -206,7 +312,7 @@ async function loadSearchIndex() {
           typeof (entry as SearchEntry).title === "string" &&
           typeof (entry as SearchEntry).type === "string" &&
           typeof (entry as SearchEntry).text === "string",
-      );
+      ).map((entry) => ({ ...entry, ...safePresentationMetadata(entry) }));
       searchIndexState = "ready";
     } catch {
       searchIndex = null;
@@ -349,8 +455,10 @@ function shell(content: string, title = "MoonCat Knowledge Archive") {
 function renderTree(node: FolderNode, depth = 0): string {
   return `<ul class="tree ${depth ? "nested" : ""}">${node.children
     .map((child) => {
-      if (child.kind === "file")
-        return `<li><a class="tree-file ${child.path === activePath ? "active" : ""}" href="${routeFor(child.path)}" title="${escapeHtml(child.path)}"><span>${escapeHtml(child.title)}</span><em>${child.extension.slice(1)}</em></a></li>`;
+      if (child.kind === "file") {
+        const badges = metadataBadges(child);
+        return `<li><a class="tree-file ${child.path === activePath ? "active" : ""}" href="${routeFor(child.path)}" title="${escapeHtml(child.path)}"><span>${escapeHtml(child.title)}</span><span class="tree-file-meta">${badges.map((badge) => `<i>${badge}</i>`).join("")}<em>${child.extension.slice(1)}</em></span></a></li>`;
+      }
       const containsActive = allFiles(child).some(
         (file) => file.path === activePath,
       );
@@ -591,7 +699,7 @@ async function filePage(path: string) {
           ? renderJson(content)
           : rawView(content);
     return shell(
-      `${breadcrumbs(file)}<header class="record-header"><p class="eyebrow">${file.type.toUpperCase()} RECORD // ${formatSize(file.size)}</p><h1>${escapeHtml(file.title)}</h1><p>${escapeHtml(file.path)}</p><div class="view-switch"><button class="${!rawMode ? "selected" : ""}" data-mode="structured">${file.type === "json" ? "Structured" : "Rendered"}</button><button class="${rawMode ? "selected" : ""}" data-mode="raw">Raw content</button></div></header>${view}`,
+      `${breadcrumbs(file)}<header class="record-header"><p class="eyebrow">${file.type.toUpperCase()} RECORD // ${formatSize(file.size)}</p><h1>${escapeHtml(file.title)}</h1><p>${escapeHtml(file.path)}</p>${metadataSummary(file)}<div class="view-switch"><button class="${!rawMode ? "selected" : ""}" data-mode="structured">${file.type === "json" ? "Structured" : "Rendered"}</button><button class="${rawMode ? "selected" : ""}" data-mode="raw">Raw content</button></div></header>${view}`,
       file.title,
     );
   } catch (error) {

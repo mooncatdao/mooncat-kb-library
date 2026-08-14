@@ -11,6 +11,10 @@ const rootFiles = new Set(['README.md', 'CONTRIBUTING.md', 'llms.txt']);
 const allowedRoots = new Set(['docs', 'data', 'examples']);
 const excludedNames = new Set(['result.md', 'agents.md', 'references', 'scripts', '.git', 'node_modules']);
 const maxSearchTextLength = 24000;
+const allowedFileRoles = new Set(['canonical-data', 'documentation', 'entrypoint', 'example', 'generator', 'license-notice', 'project-metadata', 'source-index', 'validator', 'workflow-data']);
+const allowedCurationModes = new Set(['curated', 'generated', 'local-policy']);
+const allowedStatuses = new Set(['curated', 'doc', 'example', 'generated', 'script']);
+const allowedSourceBackedStatuses = new Set(['contains-source-reference', 'not-applicable', 'registered-source']);
 
 if (!existsSync(kbRoot)) {
   console.error(`MoonCat KB was not found at ${kbRoot}. Set MCKB_PATH to the KB checkout.`);
@@ -67,6 +71,45 @@ function sourceCommit() {
   }
 }
 
+function safeMetadataString(value, allowed) {
+  return typeof value === 'string' && allowed.has(value) ? value : undefined;
+}
+
+function safeMetadataList(value, allowed) {
+  if (!Array.isArray(value)) return undefined;
+  const values = [...new Set(value)].filter((item) => typeof item === 'string' && allowed.has(item));
+  return values.length ? values : undefined;
+}
+
+function presentationMetadata(entry) {
+  if (!entry || typeof entry !== 'object') return {};
+  const metadata = {};
+  const fileRole = safeMetadataString(entry.fileRole, allowedFileRoles);
+  const curationMode = safeMetadataString(entry.curationMode, allowedCurationModes);
+  const statuses = safeMetadataList(entry.statuses, allowedStatuses);
+  const sourceBackedStatus = safeMetadataString(entry.sourceBackedStatus, allowedSourceBackedStatuses);
+  const topics = Array.isArray(entry.topics)
+    ? [...new Set(entry.topics)].filter((topic) => typeof topic === 'string' && topic.length <= 64).slice(0, 8)
+    : undefined;
+  if (fileRole) metadata.fileRole = fileRole;
+  if (topics?.length) metadata.topics = topics;
+  if (curationMode) metadata.curationMode = curationMode;
+  if (statuses) metadata.statuses = statuses;
+  if (sourceBackedStatus) metadata.sourceBackedStatus = sourceBackedStatus;
+  return metadata;
+}
+
+function readPresentationManifest() {
+  try {
+    const source = readFileSync(join(kbRoot, 'data', 'kb-manifest.json'), 'utf8');
+    const parsed = JSON.parse(source);
+    if (!Array.isArray(parsed.entries)) return new Map();
+    return new Map(parsed.entries.map((entry) => [entry?.path, presentationMetadata(entry)]).filter(([path]) => typeof path === 'string'));
+  } catch {
+    return new Map();
+  }
+}
+
 function normalizeSearchText(value) {
   return value.replace(/\s+/g, ' ').trim();
 }
@@ -116,6 +159,7 @@ function searchTextFor(file) {
 rmSync(outputRoot, { recursive: true, force: true });
 mkdirSync(contentRoot, { recursive: true });
 const tree = makeFolder('', '');
+const presentationByPath = readPresentationManifest();
 
 for (const file of rootFiles) {
   const source = join(kbRoot, file);
@@ -140,6 +184,7 @@ function collect(node) {
   else node.children.forEach(collect);
 }
 collect(tree);
+for (const file of files) Object.assign(file, presentationByPath.get(file.path) || {});
 writeFileSync(join(outputRoot, 'manifest.json'), `${JSON.stringify({
   version: 1,
   generatedAt: new Date().toISOString(),
@@ -155,6 +200,7 @@ writeFileSync(join(outputRoot, 'search-index.json'), `${JSON.stringify({
     title: file.title,
     type: file.type,
     text: searchTextFor(file),
+    ...(presentationByPath.get(file.path) || {}),
   })),
 }, null, 2)}\n`);
 console.log(`Generated ${files.length} KB files from ${kbRoot}`);
