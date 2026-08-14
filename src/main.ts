@@ -689,7 +689,7 @@ function shell(content: string, title = "MoonCat Knowledge Archive") {
   return `<section class="wrap-standard" id="column-3">
     <div class="wrap shell-header-row">
       <div class="left-frame-top">
-        <a class="panel-1-button" href="#/"><span>MOONCAT</span><small>KNOWLEDGE ARCHIVE</small></a>
+        <a class="panel-1-button" href="#/"><span>MOONCAT</span><span>KNOWLEDGE</span><span>ARCHIVE</span></a>
         <div class="panel-2">02<span class="hop">-25439</span></div>
       </div>
       <header class="right-frame-top">
@@ -704,15 +704,15 @@ function shell(content: string, title = "MoonCat Knowledge Archive") {
     <div class="wrap" id="gap">
       <aside class="left-frame" aria-label="Archive sections">
         <div class="frame-panels">
-          <button type="button" class="panel-3" data-back-control aria-label="Back to previous library page">03<span class="hop" aria-hidden="true">-BACK</span></button>
-          <a class="panel-4" href="${guideHref}">04<span class="hop">-GUIDE</span></a>
-          <a class="panel-5" href="${routeForSection("topics")}">05<span class="hop">-TOPICS</span></a>
-          <a class="panel-6" href="${routeForSection("examples")}">06<span class="hop">-EXAMPLES</span></a>
-          <a class="panel-7" href="${routeForSection("archive")}">07<span class="hop">-ARCHIVE</span></a>
-          <a class="panel-8" href="${routeForSection("profile")}">08<span class="hop">-PROFILE</span></a>
-          <a class="panel-9" href="${routeFor("docs/reference-policy.md")}">09<span class="hop">-SOURCES</span></a>
+          <button type="button" class="panel-3" data-back-control aria-label="Back to previous library page">03<span class="hop" aria-hidden="true"><i>-</i>BACK</span></button>
+          <a class="panel-4" href="${guideHref}">04<span class="hop"><i aria-hidden="true">-</i>GUIDE</span></a>
+          <a class="panel-5" href="${routeForSection("topics")}">05<span class="hop"><i aria-hidden="true">-</i>TOPICS</span></a>
+          <a class="panel-6" href="${routeForSection("examples")}">06<span class="hop"><i aria-hidden="true">-</i>EXAMPLES</span></a>
+          <a class="panel-7" href="${routeForSection("archive")}">07<span class="hop"><i aria-hidden="true">-</i>ARCHIVE</span></a>
+          <a class="panel-8" href="${routeForSection("profile")}">08<span class="hop"><i aria-hidden="true">-</i>PROFILE</span></a>
+          <a class="panel-9" href="${routeFor("docs/reference-policy.md")}">09<span class="hop"><i aria-hidden="true">-</i>SOURCES</span></a>
+          <a class="panel-10" href="${routeFor("CONTRIBUTING.md")}">10<span class="hop"><i aria-hidden="true">-</i>CONTRIBUTE</span></a>
         </div>
-        <a class="panel-10" href="${routeFor("CONTRIBUTING.md")}">10<span class="hop">-CONTRIBUTE</span></a>
       </aside>
       <div class="right-frame">
         <div class="bar-panel" aria-hidden="true"><div class="bar-6"></div><div class="bar-7"></div><div class="bar-8"></div><div class="bar-9"></div><div class="bar-10"></div></div>
@@ -811,6 +811,17 @@ function renderMarkdown(content: string, file: FileNode) {
       link.rel = "noreferrer";
     }
   });
+  holder.querySelectorAll<HTMLElement>("code").forEach((code) => {
+    if (code.closest("pre, a")) return;
+    const exactPath = code.textContent ?? "";
+    if (exactPath.trim() !== exactPath || !looksLikePath(exactPath)) return;
+    if (!findFile(exactPath)) return;
+    const link = document.createElement("a");
+    link.className = "inline-file-link";
+    link.href = routeFor(exactPath);
+    code.replaceWith(link);
+    link.append(code);
+  });
   holder.querySelectorAll<HTMLUListElement>("ul").forEach((list) =>
     list.classList.add("lcars-list"),
   );
@@ -830,7 +841,7 @@ function labelFor(key: string) {
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 function looksLikePath(value: string) {
-  return /^(docs|data|examples)\/.+\.(md|json)$/i.test(value);
+  return /^(?:[A-Za-z0-9._-]+\/)*[A-Za-z0-9._-]+\.(?:md|json)$/i.test(value);
 }
 
 type JsonRecord = Record<string, unknown>;
@@ -1099,7 +1110,7 @@ async function start() {
   document.addEventListener("click", rememberInternalRouteClick);
   window.addEventListener("hashchange", () => {
     reconcileRouteHistory();
-    void render();
+    void render().then(() => window.scrollTo({ top: 0, left: 0, behavior: "auto" }));
   });
   window.addEventListener("keydown", (event) => {
     if (

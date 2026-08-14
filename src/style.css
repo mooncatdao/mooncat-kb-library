@@ -30,7 +30,7 @@
   --corner-color-top: var(--bluey);
   --corner-color-bottom: var(--red);
   --panel-1-color: var(--african-violet);
-  --panel-4-color: var(--red);
+  --panel-4-color: var(--almond-creme);
   --panel-5-color: var(--orange);
   --panel-6-color: var(--butterscotch);
   --panel-7-color: var(--bluey);
@@ -65,8 +65,8 @@
   --nav-width: 140px;
   --dc-font-size: 0.72rem;
   --dc-row-height: 0.83rem;
-  --lcars-bar-color: var(--african-violet);
-  --lcars-bar-start-color: var(--bluey);
+  --lcars-bar-color: var(--almond-creme);
+  --lcars-bar-start-color: var(--butterscotch);
   --lcars-bar-end-color: var(--butterscotch);
   --lcars-bar-text-color: var(--gold);
   background: #000;
@@ -145,7 +145,7 @@ button {
 .panel-1-button {
   display: flex;
   width: 100%;
-  min-height: clamp(90px, 11vw, 160px);
+  min-height: clamp(82px, 8vw, 124px);
   overflow: hidden;
   padding: var(--left-frame-padding);
   flex-direction: column;
@@ -159,13 +159,8 @@ button {
 }
 
 .panel-1-button span {
-  font-size: 1.2rem;
+  font-size: 1.28rem;
   letter-spacing: 0.06em;
-}
-
-.panel-1-button small {
-  font-size: 0.65em;
-  letter-spacing: 0.08em;
 }
 
 .panel-2 {
@@ -421,9 +416,10 @@ button {
   min-height: calc(100vh - 225px);
   padding-top: 56px;
   flex-direction: column;
-  justify-content: space-between;
+  justify-content: flex-start;
   background: var(--left-frame-color);
   border-radius: var(--radius-bottom);
+  font-size: clamp(0.95rem, 1.8vw, 1.28rem);
 }
 
 .left-frame a,
@@ -453,6 +449,13 @@ button {
   justify-content: flex-end;
 }
 
+.frame-panels {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+}
+
 .panel-3,
 .panel-4,
 .panel-5,
@@ -462,14 +465,19 @@ button {
   border-bottom: var(--panel-border);
 }
 
-.panel-3 { min-height: 2.8rem; align-items: flex-end; }
-.panel-4 { min-height: 4.6rem; align-items: flex-end; background: var(--panel-4-color); }
-.panel-5 { min-height: 2.8rem; align-items: center; background: var(--panel-5-color); }
-.panel-6 { min-height: 4.6rem; background: var(--panel-6-color); }
-.panel-7 { min-height: 3.8rem; background: var(--panel-7-color); }
-.panel-8 { min-height: 3.2rem; background: var(--panel-8-color); }
-.panel-9 { min-height: 5.2rem; }
-.panel-10 { min-height: 4.5rem; border-top: var(--panel-border); background: var(--panel-10-color); }
+.panel-3,
+.left-frame button.panel-3 {
+  min-height: 5.6rem;
+  align-items: flex-end;
+  border-bottom: var(--panel-border);
+}
+.panel-4 { min-height: 9.2rem; align-items: flex-end; background: var(--panel-4-color); }
+.panel-5 { min-height: 5.6rem; align-items: center; background: var(--panel-5-color); }
+.panel-6 { min-height: 9.2rem; background: var(--panel-6-color); }
+.panel-7 { min-height: 7.6rem; background: var(--panel-7-color); }
+.panel-8 { min-height: 6.4rem; background: var(--panel-8-color); }
+.panel-9 { min-height: 10.4rem; }
+.panel-10 { min-height: 5.5rem; flex: 1 1 auto; align-items: flex-start; border-top: var(--panel-border); background: var(--panel-10-color); }
 
 .right-frame {
   position: relative;
@@ -1667,6 +1675,17 @@ p {
   background: #241a2e;
 }
 
+.document a.inline-file-link {
+  color: #ffcc88;
+  text-decoration-thickness: 1px;
+}
+
+.document a.inline-file-link code {
+  padding: 0.1em 0.25em;
+  background: #241a2e;
+  color: inherit;
+}
+
 .document table {
   display: block;
   margin: 1em 0;
@@ -1975,18 +1994,18 @@ p {
   .left-frame {
     min-height: 0;
     padding-top: 38px;
-    align-self: flex-start;
+    align-self: stretch;
     justify-content: flex-start;
   }
 
-  .panel-3 { min-height: 2.6rem; }
-  .panel-4 { min-height: 4rem; }
-  .panel-5 { min-height: 2.6rem; }
-  .panel-6 { min-height: 4rem; }
-  .panel-7 { min-height: 3.4rem; }
-  .panel-8 { min-height: 3rem; }
-  .panel-9 { min-height: 4.6rem; }
-  .panel-10 { min-height: 4rem; }
+  .panel-3 { min-height: 5.2rem; }
+  .panel-4 { min-height: 8rem; }
+  .panel-5 { min-height: 5.2rem; }
+  .panel-6 { min-height: 8rem; }
+  .panel-7 { min-height: 6.8rem; }
+  .panel-8 { min-height: 6rem; }
+  .panel-9 { min-height: 9.2rem; }
+  .panel-10 { min-height: 5rem; }
 
   .library-workspace {
     grid-template-columns: 1fr;
@@ -2038,15 +2057,13 @@ p {
   }
 
   .panel-1-button {
-    min-height: clamp(104px, 20vw, 130px);
+    min-height: clamp(96px, 18vw, 112px);
   }
 
   .panel-1-button span {
-    font-size: 0.9rem;
-  }
-
-  .panel-1-button small {
-    display: none;
+    font-size: 0.86rem;
+    letter-spacing: 0.015em;
+    line-height: 1.05;
   }
 
   .left-frame .panel-3,
@@ -2058,7 +2075,7 @@ p {
   .left-frame .panel-9,
   .left-frame .panel-10 {
     padding-inline: 0.4rem;
-    font-size: 0.66rem;
+    font-size: 0.78rem;
     letter-spacing: -0.01em;
     white-space: nowrap;
   }
@@ -2092,14 +2109,14 @@ p {
     padding-top: 28px;
   }
 
-  .panel-3 { min-height: 2.1rem; }
-  .panel-4 { min-height: 3.1rem; }
-  .panel-5 { min-height: 2.1rem; }
-  .panel-6 { min-height: 3.2rem; }
-  .panel-7 { min-height: 2.7rem; }
-  .panel-8 { min-height: 2.4rem; }
-  .panel-9 { min-height: 3.5rem; }
-  .panel-10 { min-height: 3rem; }
+  .panel-3 { min-height: 4.2rem; }
+  .panel-4 { min-height: 6.2rem; }
+  .panel-5 { min-height: 4.2rem; }
+  .panel-6 { min-height: 6.4rem; }
+  .panel-7 { min-height: 5.4rem; }
+  .panel-8 { min-height: 4.8rem; }
+  .panel-9 { min-height: 7rem; }
+  .panel-10 { min-height: 4rem; }
 
   main {
     min-height: 68vh;
@@ -2180,7 +2197,7 @@ p {
 
 @media (max-width: 525px) {
   :root {
-    --lfw: 98px;
+    --lfw: 72px;
     --left-frame-padding: 0.3rem;
     --radius-top: 0 0 0 30px;
     --radius-bottom: 30px 0 0 0;
@@ -2188,13 +2205,14 @@ p {
   }
 
   .panel-1-button {
-    min-height: 135px;
+    min-height: 108px;
     padding-inline: 0.25rem;
   }
 
   .panel-1-button span {
-    font-size: 0.76rem;
-    letter-spacing: 0.02em;
+    font-size: 0.82rem;
+    letter-spacing: 0;
+    line-height: 1.05;
   }
 
   .panel-2,
@@ -2220,14 +2238,21 @@ p {
   }
 
   .top-nav {
+    width: min(100%, 226px);
+    margin-left: auto;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 4px 5px;
   }
 
   .top-nav a {
     height: 40px;
-    padding: 0.28rem 0.45rem;
-    font-size: 0.67rem;
+    padding: 0.4rem 0.65rem;
+    align-items: flex-end;
+    font-size: 0.78rem;
+    line-height: 0.95;
+    justify-content: flex-end;
+    text-align: right;
+    white-space: nowrap;
   }
 
   .left-frame .panel-3,
@@ -2239,22 +2264,38 @@ p {
   .left-frame .panel-9,
   .left-frame .panel-10 {
     padding-inline: 0.3rem;
-    font-size: 0.6rem;
-    letter-spacing: -0.02em;
+    align-items: flex-end;
+    flex-direction: column;
+    font-size: 0.72rem;
+    letter-spacing: -0.015em;
+    line-height: 1.02;
+    white-space: normal;
+  }
+
+  .left-frame .hop {
+    display: block;
+  }
+
+  .left-frame .hop > i {
+    display: none;
+  }
+
+  .left-frame .panel-10 {
+    justify-content: flex-start;
   }
 
   .left-frame {
     padding-top: 20px;
   }
 
-  .panel-3 { min-height: 2rem; }
-  .panel-4 { min-height: 2.5rem; }
-  .panel-5 { min-height: 2rem; }
-  .panel-6 { min-height: 2.6rem; }
-  .panel-7 { min-height: 2.3rem; }
-  .panel-8 { min-height: 2.1rem; }
-  .panel-9 { min-height: 2.8rem; }
-  .panel-10 { min-height: 2.5rem; }
+  .panel-3 { min-height: 4rem; }
+  .panel-4 { min-height: 5rem; }
+  .panel-5 { min-height: 4rem; }
+  .panel-6 { min-height: 5.2rem; }
+  .panel-7 { min-height: 4.6rem; }
+  .panel-8 { min-height: 4.2rem; }
+  .panel-9 { min-height: 5.6rem; }
+  .panel-10 { min-height: 3.5rem; }
 
   main {
     padding-left: 10px;
