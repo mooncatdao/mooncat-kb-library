@@ -110,6 +110,8 @@ let profileInput = "";
 let profileResult: ProfileResult | null = null;
 let profileError = "";
 let profileRequestState: "idle" | "loading" = "idle";
+const inAppRouteHistory: string[] = [];
+let internalRouteClickPending = false;
 
 const escapeHtml = (value: string) =>
   value.replace(
@@ -125,6 +127,7 @@ const escapeHtml = (value: string) =>
   );
 const routeFor = (path: string) => `#/file/${encodeURIComponent(path)}`;
 const routeForSection = (section: HumanSection) => `#/${section}`;
+const currentRoute = () => location.hash || "#/";
 const formatSize = (size: number) =>
   size < 1024 ? `${size} B` : `${(size / 1024).toFixed(1)} KB`;
 
@@ -546,7 +549,7 @@ function profileResultMarkup() {
 
 function profilePage() {
   const inputLabel = profileKind === "rescueOrder" ? "Rescue order (0–25439)" : "Cat ID (0x + 10 hex digits)";
-  return shell(`<section class="profile-page"><p class="eyebrow">HUMAN ENTRYPOINT // STATIC LOOKUP</p><h1>MoonCat profile lookup</h1><p class="curated-lede">Resolve one MoonCat from the generated population snapshot by choosing an identifier kind explicitly. This lookup is local and read-only.</p><form class="profile-lookup-form" data-profile-form><label for="profile-identifier-kind">Identifier kind</label><select id="profile-identifier-kind" data-profile-kind><option value="rescueOrder" ${profileKind === "rescueOrder" ? "selected" : ""}>Rescue order</option><option value="catIdBytes5" ${profileKind === "catIdBytes5" ? "selected" : ""}>Bytes5 Cat ID</option></select><label for="profile-identifier">${inputLabel}</label><input id="profile-identifier" data-profile-input required autocomplete="off" spellcheck="false" value="${escapeHtml(profileInput)}" placeholder="${profileKind === "rescueOrder" ? "e.g. 100" : "e.g. 0x00958b3253"}"/><button type="submit" ${profileRequestState === "loading" ? "disabled" : ""}>Resolve static profile</button></form><p class="profile-help">No bare value is guessed: the selected kind controls validation. Uppercase hexadecimal letters are accepted and displayed normalized to lowercase.</p><div data-profile-result>${profileResultMarkup()}</div></section>`, humanSectionTitle("profile"));
+  return shell(`<section class="profile-page"><p class="eyebrow">HUMAN ENTRYPOINT // STATIC LOOKUP</p><h1>MoonCat profile lookup</h1><p class="curated-lede">Resolve one MoonCat from the generated population snapshot by choosing an identifier kind explicitly. This lookup is local and read-only.</p>${lcarsTextBar("Resolve a MoonCat")}<form class="profile-lookup-form" data-profile-form><label for="profile-identifier-kind">Identifier kind</label><select id="profile-identifier-kind" data-profile-kind><option value="rescueOrder" ${profileKind === "rescueOrder" ? "selected" : ""}>Rescue order</option><option value="catIdBytes5" ${profileKind === "catIdBytes5" ? "selected" : ""}>Bytes5 Cat ID</option></select><label for="profile-identifier">${inputLabel}</label><input id="profile-identifier" data-profile-input required autocomplete="off" spellcheck="false" value="${escapeHtml(profileInput)}" placeholder="${profileKind === "rescueOrder" ? "e.g. 100" : "e.g. 0x00958b3253"}"/><button type="submit" ${profileRequestState === "loading" ? "disabled" : ""}>Resolve static profile</button></form><p class="profile-help">No bare value is guessed: the selected kind controls validation. Uppercase hexadecimal letters are accepted and displayed normalized to lowercase.</p><div data-profile-result>${profileResultMarkup()}</div></section>`, humanSectionTitle("profile"));
 }
 
 function allFiles(node: TreeNode): FileNode[] {
@@ -571,6 +574,42 @@ function sectionFromHash(): HumanSection | "" {
   return ["guide", "topics", "examples", "archive", "profile"].includes(section)
     ? (section as HumanSection)
     : "";
+}
+
+function rememberInternalRouteClick(event: MouseEvent) {
+  if (
+    event.defaultPrevented ||
+    event.button !== 0 ||
+    event.metaKey ||
+    event.ctrlKey ||
+    event.shiftKey ||
+    event.altKey
+  ) return;
+  const target = event.target instanceof Element ? event.target : null;
+  const link = target?.closest<HTMLAnchorElement>('a[href^="#/"]');
+  const destination = link?.getAttribute("href");
+  if (!destination || destination === currentRoute()) return;
+  inAppRouteHistory.push(currentRoute());
+  internalRouteClickPending = true;
+}
+
+function reconcileRouteHistory() {
+  if (internalRouteClickPending) {
+    internalRouteClickPending = false;
+    return;
+  }
+  const existingIndex = inAppRouteHistory.lastIndexOf(currentRoute());
+  if (existingIndex >= 0) inAppRouteHistory.splice(existingIndex);
+}
+
+function navigateBack() {
+  while (inAppRouteHistory.at(-1) === currentRoute()) inAppRouteHistory.pop();
+  const destination = inAppRouteHistory.pop() ?? "#/";
+  if (destination !== currentRoute()) location.hash = destination;
+}
+
+function lcarsTextBar(label: string) {
+  return `<div class="lcars-text-bar"><h2>${escapeHtml(label)}</h2></div>`;
 }
 
 function linkMarkup(link: LibraryLink, className = "curated-link") {
@@ -623,6 +662,7 @@ function shell(content: string, title = "MoonCat Knowledge Archive") {
     ["Topics", routeForSection("topics")],
     ["Examples", routeForSection("examples")],
     ["Profile", routeForSection("profile")],
+    ["Archive", routeForSection("archive")],
   ];
   const nav = navItems
     .map(([label, href], index) => `<a href="${href}"><span>0${index + 1}</span>${label}</a>`)
@@ -643,6 +683,9 @@ function shell(content: string, title = "MoonCat Knowledge Archive") {
   const library = manifest
     ? `<aside class="library-browser" aria-label="Knowledge archive browser">${searchControlMarkup()}<details class="library-drawer" open><summary><span>Technical archive · all records</span><small>${fileCount}</small></summary><div class="library-tree-scroll">${renderTree(manifest.tree)}</div></details></aside>`
     : "";
+  const workspaceClass = sectionFromHash() === "archive"
+    ? "library-workspace archive-first"
+    : "library-workspace";
   return `<section class="wrap-standard" id="column-3">
     <div class="wrap shell-header-row">
       <div class="left-frame-top">
@@ -661,19 +704,19 @@ function shell(content: string, title = "MoonCat Knowledge Archive") {
     <div class="wrap" id="gap">
       <aside class="left-frame" aria-label="Archive sections">
         <div class="frame-panels">
-          <a class="panel-3" href="${guideHref}">03<span class="hop">-GUIDE</span></a>
-          <a class="panel-4" href="${routeForSection("topics")}">04<span class="hop">-TOPICS</span></a>
-          <a class="panel-5" href="${routeForSection("examples")}">05<span class="hop">-EXAMPLES</span></a>
-          <a class="panel-6" href="${routeForSection("archive")}">06<span class="hop">-ARCHIVE</span></a>
-          <a class="panel-7" href="${routeForSection("profile")}">07<span class="hop">-PROFILE</span></a>
-          <a class="panel-8" href="${routeFor("docs/reference-policy.md")}">08<span class="hop">-SOURCES</span></a>
-          <a class="panel-9" href="${routeFor("CONTRIBUTING.md")}">09<span class="hop">-CONTRIBUTE</span></a>
+          <button type="button" class="panel-3" data-back-control aria-label="Back to previous library page">03<span class="hop" aria-hidden="true">-BACK</span></button>
+          <a class="panel-4" href="${guideHref}">04<span class="hop">-GUIDE</span></a>
+          <a class="panel-5" href="${routeForSection("topics")}">05<span class="hop">-TOPICS</span></a>
+          <a class="panel-6" href="${routeForSection("examples")}">06<span class="hop">-EXAMPLES</span></a>
+          <a class="panel-7" href="${routeForSection("archive")}">07<span class="hop">-ARCHIVE</span></a>
+          <a class="panel-8" href="${routeForSection("profile")}">08<span class="hop">-PROFILE</span></a>
+          <a class="panel-9" href="${routeFor("docs/reference-policy.md")}">09<span class="hop">-SOURCES</span></a>
         </div>
-        <div class="panel-10">10<span class="hop">-MCKB</span></div>
+        <a class="panel-10" href="${routeFor("CONTRIBUTING.md")}">10<span class="hop">-CONTRIBUTE</span></a>
       </aside>
       <div class="right-frame">
         <div class="bar-panel" aria-hidden="true"><div class="bar-6"></div><div class="bar-7"></div><div class="bar-8"></div><div class="bar-9"></div><div class="bar-10"></div></div>
-        <main id="content" tabindex="-1"><div class="library-workspace">${library}<div class="content-pane">${content}</div></div></main>
+        <main id="content" tabindex="-1"><div class="${workspaceClass}">${library}<div class="content-pane">${content}</div></div></main>
         <footer class="site-footer"><span>MOONCAT KB // READ-ONLY PRESENTATION LAYER</span><span>LCARS Inspired Website Template by <a href="https://www.thelcars.com/" target="_blank" rel="noreferrer">www.TheLCARS.com</a>.</span></footer>
       </div>
     </div>
@@ -710,22 +753,22 @@ function humanPage(section: HumanSection) {
     : '<p class="curated-empty">The human guide is not present in this generated archive. Use the technical archive below.</p>';
   if (section === "guide")
     return shell(
-      `<section class="curated-page"><p class="eyebrow">HUMAN ENTRYPOINT // START HERE</p><h1>Using MoonCat KB</h1><p class="curated-lede">A goal-oriented introduction to the archive, its evidence boundaries, and the quickest route to a useful answer.</p><div class="curated-actions">${guideLink}<a class="curated-secondary" href="${routeForSection("topics")}"><strong>Explore by goal</strong><small>Choose a topic without browsing folders.</small></a></div><section class="curated-note"><h2>Read the guide first</h2><p>The guide is the primary human starting point. The complete technical archive remains available as a secondary, file-oriented view.</p></section></section>`,
+      `<section class="curated-page"><p class="eyebrow">HUMAN ENTRYPOINT // START HERE</p><h1>Using MoonCat KB</h1><p class="curated-lede">A goal-oriented introduction to the archive, its evidence boundaries, and the quickest route to a useful answer.</p>${lcarsTextBar("Start here")}<div class="curated-actions">${guideLink}<a class="curated-secondary" href="${routeForSection("topics")}"><strong>Explore by goal</strong><small>Choose a topic without browsing folders.</small></a></div><section class="curated-note"><h2>Read the guide first</h2><p>The guide is the primary human starting point. The complete technical archive remains available as a secondary, file-oriented view.</p></section></section>`,
       humanSectionTitle(section),
     );
   if (section === "topics")
     return shell(
-      `<section class="curated-page"><p class="eyebrow">HUMAN ENTRYPOINT // TOPICS</p><h1>Explore by goal</h1><p class="curated-lede">Choose a starting point by what you want to understand or build. Each card routes to an existing source document.</p><div class="curated-actions"><a class="curated-primary" href="${routeForSection("profile")}"><strong>Look up one MoonCat</strong><small>Resolve a rescue order or bytes5 Cat ID from the static population.</small></a></div>${curatedCards(LIBRARY_TOPICS)}<div class="curated-actions"><a class="curated-secondary" href="${routeForSection("guide")}"><strong>Read the human guide</strong><small>Get the archive's orientation and boundaries.</small></a><a class="curated-secondary" href="${routeForSection("archive")}"><strong>Open all records</strong><small>Browse the complete generated file tree.</small></a></div></section>`,
+      `<section class="curated-page"><p class="eyebrow">HUMAN ENTRYPOINT // TOPICS</p><h1>Explore by goal</h1><p class="curated-lede">Choose a starting point by what you want to understand or build. Each card routes to an existing source document.</p>${lcarsTextBar("Curated destinations")}<div class="curated-actions"><a class="curated-primary" href="${routeForSection("profile")}"><strong>Look up one MoonCat</strong><small>Resolve a rescue order or bytes5 Cat ID from the static population.</small></a></div>${curatedCards(LIBRARY_TOPICS)}<div class="curated-actions"><a class="curated-secondary" href="${routeForSection("guide")}"><strong>Read the human guide</strong><small>Get the archive's orientation and boundaries.</small></a><a class="curated-secondary" href="${routeForSection("archive")}"><strong>Open all records</strong><small>Browse the complete generated file tree.</small></a></div></section>`,
       humanSectionTitle(section),
     );
   if (section === "examples")
     return shell(
-      `<section class="curated-page"><p class="eyebrow">HUMAN ENTRYPOINT // EXAMPLES</p><h1>Executable examples</h1><p class="curated-lede">Small, local examples that demonstrate bounded ways to use the KB without adding a live service or competing dataset.</p>${curatedCards(LIBRARY_EXAMPLES, "curated-grid examples-grid")}<div class="curated-actions"><a class="curated-secondary" href="${routeForSection("guide")}"><strong>Read the human guide</strong><small>Choose a goal before opening an implementation.</small></a><a class="curated-secondary" href="${routeForSection("archive")}"><strong>Open all records</strong><small>Find supporting docs and data in the technical tree.</small></a></div></section>`,
+      `<section class="curated-page"><p class="eyebrow">HUMAN ENTRYPOINT // EXAMPLES</p><h1>Executable examples</h1><p class="curated-lede">Small, local examples that demonstrate bounded ways to use the KB without adding a live service or competing dataset.</p>${lcarsTextBar("Local examples")}${curatedCards(LIBRARY_EXAMPLES, "curated-grid examples-grid")}<div class="curated-actions"><a class="curated-secondary" href="${routeForSection("guide")}"><strong>Read the human guide</strong><small>Choose a goal before opening an implementation.</small></a><a class="curated-secondary" href="${routeForSection("archive")}"><strong>Open all records</strong><small>Find supporting docs and data in the technical tree.</small></a></div></section>`,
       humanSectionTitle(section),
     );
   if (section === "profile") return profilePage();
   return shell(
-    `<section class="curated-page"><p class="eyebrow">SECONDARY VIEW // COMPLETE FILE TREE</p><h1>Technical archive</h1><p class="curated-lede">All generated Markdown, JSON, and text records remain available in the archive browser at left. Use search or the tree when you already know the file or need technical detail.</p><div class="curated-actions"><a class="curated-primary" href="${routeForSection("guide")}"><strong>Return to human guide</strong><small>Start with a goal-oriented route.</small></a><a class="curated-secondary" href="${routeForSection("topics")}"><strong>Browse curated topics</strong><small>Use the human-facing entrypoints.</small></a></div></section>`,
+    `<section class="curated-page"><p class="eyebrow">SECONDARY VIEW // COMPLETE FILE TREE</p><h1>Technical archive</h1><p class="curated-lede">All generated Markdown, JSON, and text records remain available in the archive browser at left. Use search or the tree when you already know the file or need technical detail.</p>${lcarsTextBar("Browse all records")}<div class="curated-actions"><a class="curated-primary" href="${routeForSection("guide")}"><strong>Return to human guide</strong><small>Start with a goal-oriented route.</small></a><a class="curated-secondary" href="${routeForSection("topics")}"><strong>Browse curated topics</strong><small>Use the human-facing entrypoints.</small></a></div></section>`,
     humanSectionTitle(section),
   );
 }
@@ -735,7 +778,7 @@ function home() {
     ? `SOURCE COMMIT ${manifest.source.commit.slice(0, 12)}`
     : "SOURCE COMMIT UNAVAILABLE";
   return shell(
-    `<section class="home-hero"><p class="eyebrow">MOONCAT DAO // HUMAN-FIRST KNOWLEDGE SYSTEM</p><h1>MoonCat Knowledge Archive</h1><p>A read-only library for people who want a useful starting point before opening the complete technical record set.</p><div class="home-meta"><span>${manifest?.fileCount ?? 0} PUBLISHABLE RECORDS</span><span>${source}</span></div></section><section class="guide-spotlight"><p class="eyebrow">PRIMARY STARTING POINT</p><h2>Using MoonCat KB</h2><p>Begin with the goal-oriented guide, then follow a curated topic or example into the source-backed archive.</p>${guideLinkMarkup()}<div class="spotlight-links"><a href="${routeForSection("topics")}">Explore by goal <span>→</span></a><a href="${routeForSection("examples")}">Open examples <span>→</span></a><a href="${routeForSection("profile")}">Profile lookup <span>→</span></a><a href="${routeForSection("archive")}">Technical archive <span>→</span></a></div></section><section class="home-topic-preview"><div><p class="eyebrow">CURATED TOPICS</p><h2>Where do you want to go?</h2></div><div class="topic-preview-grid">${LIBRARY_TOPICS.slice(0, 6).map((link) => linkMarkup(link, "topic-preview-link")).filter(Boolean).join("")}</div><a class="curated-secondary" href="${routeForSection("topics")}"><strong>See all topics</strong><small>Browse the complete goal-oriented index.</small></a></section>`,
+    `<section class="home-hero"><p class="eyebrow">MOONCAT DAO // HUMAN-FIRST KNOWLEDGE SYSTEM</p><h1>MoonCat Knowledge Archive</h1><p>A read-only library for people who want a useful starting point before opening the complete technical record set.</p><div class="home-meta"><span>${manifest?.fileCount ?? 0} PUBLISHABLE RECORDS</span><span>${source}</span></div></section><section class="guide-spotlight"><p class="eyebrow">PRIMARY STARTING POINT</p>${lcarsTextBar("Using MoonCat KB")}<p>Begin with the goal-oriented guide, then follow a curated topic or example into the source-backed archive.</p>${guideLinkMarkup()}<div class="spotlight-links"><a href="${routeForSection("topics")}">Explore by goal <span>→</span></a><a href="${routeForSection("examples")}">Open examples <span>→</span></a><a href="${routeForSection("profile")}">Profile lookup <span>→</span></a><a href="${routeForSection("archive")}">Technical archive <span>→</span></a></div></section><section class="home-topic-preview"><div><p class="eyebrow">CURATED TOPICS</p>${lcarsTextBar("Where do you want to go?")}</div><div class="topic-preview-grid">${LIBRARY_TOPICS.slice(0, 6).map((link) => linkMarkup(link, "topic-preview-link")).filter(Boolean).join("")}</div><a class="curated-secondary" href="${routeForSection("topics")}"><strong>See all topics</strong><small>Browse the complete goal-oriented index.</small></a></section>`,
   );
 }
 
@@ -767,6 +810,15 @@ function renderMarkdown(content: string, file: FileNode) {
       link.target = "_blank";
       link.rel = "noreferrer";
     }
+  });
+  holder.querySelectorAll<HTMLUListElement>("ul").forEach((list) =>
+    list.classList.add("lcars-list"),
+  );
+  holder.querySelectorAll<HTMLHRElement>("hr").forEach((rule) => {
+    const bar = document.createElement("div");
+    bar.className = "lcars-bar";
+    bar.setAttribute("role", "separator");
+    rule.replaceWith(bar);
   });
   return `<article class="document markdown">${holder.innerHTML}</article>`;
 }
@@ -941,6 +993,9 @@ async function filePage(path: string) {
 
 function bindPage() {
   document
+    .querySelector<HTMLButtonElement>("[data-back-control]")
+    ?.addEventListener("click", navigateBack);
+  document
     .querySelectorAll<HTMLButtonElement>("[data-mode]")
     .forEach((button) =>
       button.addEventListener("click", () => {
@@ -1041,7 +1096,11 @@ async function start() {
     manifest = null;
   }
   void loadSearchIndex();
-  window.addEventListener("hashchange", () => void render());
+  document.addEventListener("click", rememberInternalRouteClick);
+  window.addEventListener("hashchange", () => {
+    reconcileRouteHistory();
+    void render();
+  });
   window.addEventListener("keydown", (event) => {
     if (
       event.key.toLocaleLowerCase() === "k" &&
