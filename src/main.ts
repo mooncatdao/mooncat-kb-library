@@ -55,7 +55,37 @@ type SearchResult = {
   matchedTokens: number;
 };
 type SearchScope = "all" | "guides" | "data" | "examples";
-type HumanSection = "guide" | "topics" | "examples" | "archive";
+type HumanSection = "guide" | "topics" | "examples" | "archive" | "profile";
+type ProfileIdentifierKind = "rescueOrder" | "catIdBytes5";
+type ProfileShard = {
+  path: string;
+  startRescueOrder: number;
+  endRescueOrder: number;
+};
+type ProfileLookupArtifact = {
+  version: number;
+  rowCount: number;
+  populationManifestPath: string;
+  shards: ProfileShard[];
+  catIdToRescueOrder: Record<string, number>;
+};
+type MooncatProfileRow = {
+  catId: string;
+  rescueOrder: number;
+  traits: Record<string, unknown>;
+  genesis: boolean;
+  color: Record<string, unknown>;
+  rescueBuckets: string[];
+  characterCategories: string[];
+  name: Record<string, unknown> | null;
+};
+type ProfileResult = {
+  kind: ProfileIdentifierKind;
+  value: string;
+  normalizedValue: string;
+  row: MooncatProfileRow;
+  shard: ProfileShard;
+};
 
 const app = document.querySelector<HTMLDivElement>("#app");
 const markdown = new MarkdownIt({
@@ -72,6 +102,14 @@ let searchIndexPromise: Promise<void> | null = null;
 let searchQuery = "";
 let searchScope: SearchScope = "all";
 let archiveTreeScrollTop = 0;
+let profileLookup: ProfileLookupArtifact | null = null;
+let profileLookupState: "idle" | "loading" | "ready" | "failed" = "idle";
+let profileLookupPromise: Promise<void> | null = null;
+let profileKind: ProfileIdentifierKind = "rescueOrder";
+let profileInput = "";
+let profileResult: ProfileResult | null = null;
+let profileError = "";
+let profileRequestState: "idle" | "loading" = "idle";
 
 const escapeHtml = (value: string) =>
   value.replace(
@@ -324,6 +362,193 @@ async function loadSearchIndex() {
   return searchIndexPromise;
 }
 
+function isProfileLookupArtifact(value: unknown): value is ProfileLookupArtifact {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const artifact = value as Partial<ProfileLookupArtifact>;
+  return (
+    artifact.version === 1 &&
+    artifact.rowCount === 25440 &&
+    artifact.populationManifestPath === "data/mooncat-population/manifest.json" &&
+    Array.isArray(artifact.shards) &&
+    artifact.shards.length > 0 &&
+    artifact.shards.every(
+      (shard) =>
+        typeof shard === "object" &&
+        shard !== null &&
+        typeof shard.path === "string" &&
+        typeof shard.startRescueOrder === "number" &&
+        typeof shard.endRescueOrder === "number",
+    ) &&
+    !!artifact.catIdToRescueOrder &&
+    typeof artifact.catIdToRescueOrder === "object" &&
+    !Array.isArray(artifact.catIdToRescueOrder)
+  );
+}
+
+async function loadProfileLookup() {
+  if (profileLookupPromise) return profileLookupPromise;
+  profileLookupState = "loading";
+  profileLookupPromise = (async () => {
+    try {
+      const response = await fetch("./kb/profile-lookup.json");
+      if (!response.ok) throw new Error(`Request returned ${response.status}`);
+      const payload: unknown = await response.json();
+      if (!isProfileLookupArtifact(payload)) throw new Error("Invalid profile lookup artifact");
+      profileLookup = payload;
+      profileLookupState = "ready";
+    } catch {
+      profileLookup = null;
+      profileLookupState = "failed";
+    }
+  })();
+  return profileLookupPromise;
+}
+
+function profileShardForOrder(rescueOrder: number) {
+  return profileLookup?.shards.find(
+    (shard) =>
+      rescueOrder >= shard.startRescueOrder && rescueOrder <= shard.endRescueOrder,
+  );
+}
+
+function isProfileRow(value: unknown): value is MooncatProfileRow {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const row = value as Partial<MooncatProfileRow>;
+  return (
+    typeof row.catId === "string" &&
+    typeof row.rescueOrder === "number" &&
+    !!row.traits &&
+    typeof row.traits === "object" &&
+    !Array.isArray(row.traits) &&
+    typeof row.genesis === "boolean" &&
+    !!row.color &&
+    typeof row.color === "object" &&
+    !Array.isArray(row.color) &&
+    Array.isArray(row.rescueBuckets) &&
+    Array.isArray(row.characterCategories) &&
+    (row.name === null || (typeof row.name === "object" && !Array.isArray(row.name)))
+  );
+}
+
+async function readProfileRow(shard: ProfileShard, rescueOrder: number, catId?: string) {
+  const response = await fetch(
+    `./kb/content/${shard.path.split("/").map(encodeURIComponent).join("/")}`,
+  );
+  if (!response.ok) throw new Error(`Request returned ${response.status}`);
+  const payload: unknown = await response.json();
+  if (!payload || typeof payload !== "object" || !Array.isArray((payload as { rows?: unknown }).rows))
+    throw new Error("Population shard has no rows");
+  const row = (payload as { rows: unknown[] }).rows.find((candidate) => {
+    if (!isProfileRow(candidate)) return false;
+    return catId ? candidate.catId === catId : candidate.rescueOrder === rescueOrder;
+  });
+  if (!isProfileRow(row)) throw new Error("Population row unavailable");
+  return row;
+}
+
+async function lookupProfile() {
+  profileResult = null;
+  profileError = "";
+  profileRequestState = "loading";
+  const rawValue = profileInput.trim();
+  try {
+    await loadProfileLookup();
+    if (!profileLookup || profileLookupState !== "ready") {
+      profileError = "The generated static profile index is unavailable. Open the archive or try again after regenerating the KB.";
+      return;
+    }
+
+    let rescueOrder: number;
+    let normalizedValue: string;
+    let normalizedCatId: string | undefined;
+    if (profileKind === "rescueOrder") {
+      if (!/^\d+$/.test(rawValue)) {
+        profileError = "Rescue order must be a whole number from 0 through 25439.";
+        return;
+      }
+      rescueOrder = Number(rawValue);
+      if (!Number.isSafeInteger(rescueOrder) || rescueOrder < 0 || rescueOrder > 25439) {
+        profileError = "Rescue order must be a whole number from 0 through 25439.";
+        return;
+      }
+      normalizedValue = String(rescueOrder);
+    } else {
+      if (!/^0x[0-9a-fA-F]{10}$/.test(rawValue)) {
+        profileError = "Cat ID must use 0x followed by exactly 10 hexadecimal digits.";
+        return;
+      }
+      normalizedCatId = rawValue.toLowerCase();
+      const mappedOrder = profileLookup.catIdToRescueOrder[normalizedCatId];
+      if (!Number.isInteger(mappedOrder)) {
+        profileError = `No static population row matches Cat ID ${normalizedCatId}.`;
+        return;
+      }
+      rescueOrder = mappedOrder;
+      normalizedValue = normalizedCatId;
+    }
+
+    const shard = profileShardForOrder(rescueOrder);
+    if (!shard) {
+      profileError = "The generated profile index has no shard for that rescue order.";
+      return;
+    }
+    const row = await readProfileRow(shard, rescueOrder, normalizedCatId);
+    profileResult = {
+      kind: profileKind,
+      value: rawValue,
+      normalizedValue,
+      row,
+      shard,
+    };
+  } catch {
+    profileError = "The static population row could not be loaded from the generated KB.";
+  } finally {
+    profileRequestState = "idle";
+  }
+}
+
+function profileValue(value: unknown) {
+  if (value === null || value === undefined) return "—";
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+  return escapeHtml(String(value));
+}
+
+function profileList(values: string[]) {
+  return values.length
+    ? `<ul class="profile-list">${values.map((value) => `<li>${escapeHtml(value)}</li>`).join("")}</ul>`
+    : '<p class="profile-muted">None recorded</p>';
+}
+
+function profileObjectFields(values: Record<string, unknown>) {
+  return Object.entries(values)
+    .map(([key, value]) => `<div><dt>${escapeHtml(labelFor(key))}</dt><dd>${profileValue(value)}</dd></div>`)
+    .join("");
+}
+
+function profileSourceLink(path: string, label: string) {
+  return findFile(path)
+    ? `<a href="${routeFor(path)}">${escapeHtml(label)}</a>`
+    : `<span>${escapeHtml(label)}</span>`;
+}
+
+function profileResultMarkup() {
+  if (profileRequestState === "loading") return '<p class="profile-status">Loading the static population row…</p>';
+  if (profileLookupState === "failed" && !profileResult) return '<p class="profile-error" role="alert">The generated static profile index is unavailable. Open the archive or regenerate the KB artifacts.</p>';
+  if (profileError) return `<p class="profile-error" role="alert">${escapeHtml(profileError)}</p>`;
+  if (!profileResult) return '<p class="profile-muted">Enter an explicit identifier to resolve one static population row.</p>';
+  const { row, shard } = profileResult;
+  const nameText = row.name && typeof row.name.text === "string" ? row.name.text : "Unnamed in the pinned finalized snapshot";
+  const nameMeta = row.name
+    ? `<small>FINALIZED SNAPSHOT · ${row.name.namedYear ? `NAMED ${profileValue(row.name.namedYear)}` : "RECORDED NAME"}</small>`
+    : `<small>NAME FIELD IS NULL IN THE PINNED FINALIZED SNAPSHOT</small>`;
+  return `<article class="profile-result"><header class="profile-result-header"><p class="eyebrow">STATIC POPULATION ROW</p><h2>${escapeHtml(nameText)}</h2><p class="profile-result-id"><code>${escapeHtml(row.catId)}</code><span>RESCUE ORDER ${row.rescueOrder}</span></p>${nameMeta}</header><div class="profile-field-grid"><section class="profile-field"><h3>Identity</h3><dl>${profileObjectFields({ catId: row.catId, rescueOrder: row.rescueOrder })}</dl></section><section class="profile-field"><h3>Traits</h3><dl>${profileObjectFields(row.traits)}</dl></section><section class="profile-field"><h3>Color classification</h3><dl>${profileObjectFields(row.color)}</dl><p class="profile-muted">Display classification only; not an on-chain trait, palette, rarity, or rendering proof.</p></section><section class="profile-field"><h3>Membership</h3><dl><div><dt>Genesis</dt><dd>${profileValue(row.genesis)}</dd></div></dl><h4>Rescue buckets</h4>${profileList(row.rescueBuckets)}<h4>Character categories</h4>${profileList(row.characterCategories)}</section></div><aside class="profile-provenance"><h3>Static provenance boundary</h3><p>This profile is read from the generated MoonCat KB population snapshot. It does not establish current ownership, accessory state, market state, live chain/API state, provisional naming, or complete naming history.</p><p class="profile-links">${profileSourceLink("docs/mooncat-population-index.md", "Population index")}${profileSourceLink("docs/identifier-conventions.md", "Identifier conventions")}${profileSourceLink("data/mooncat-population/manifest.json", "Population manifest")}${profileSourceLink(shard.path, "Underlying shard")}</p></aside></article>`;
+}
+
+function profilePage() {
+  const inputLabel = profileKind === "rescueOrder" ? "Rescue order (0–25439)" : "Cat ID (0x + 10 hex digits)";
+  return shell(`<section class="profile-page"><p class="eyebrow">HUMAN ENTRYPOINT // STATIC LOOKUP</p><h1>MoonCat profile lookup</h1><p class="curated-lede">Resolve one MoonCat from the generated population snapshot by choosing an identifier kind explicitly. This lookup is local and read-only.</p><form class="profile-lookup-form" data-profile-form><label for="profile-identifier-kind">Identifier kind</label><select id="profile-identifier-kind" data-profile-kind><option value="rescueOrder" ${profileKind === "rescueOrder" ? "selected" : ""}>Rescue order</option><option value="catIdBytes5" ${profileKind === "catIdBytes5" ? "selected" : ""}>Bytes5 Cat ID</option></select><label for="profile-identifier">${inputLabel}</label><input id="profile-identifier" data-profile-input required autocomplete="off" spellcheck="false" value="${escapeHtml(profileInput)}" placeholder="${profileKind === "rescueOrder" ? "e.g. 100" : "e.g. 0x00958b3253"}"/><button type="submit" ${profileRequestState === "loading" ? "disabled" : ""}>Resolve static profile</button></form><p class="profile-help">No bare value is guessed: the selected kind controls validation. Uppercase hexadecimal letters are accepted and displayed normalized to lowercase.</p><div data-profile-result>${profileResultMarkup()}</div></section>`, humanSectionTitle("profile"));
+}
+
 function allFiles(node: TreeNode): FileNode[] {
   return node.kind === "file" ? [node] : node.children.flatMap(allFiles);
 }
@@ -343,7 +568,7 @@ function pathFromHash() {
 
 function sectionFromHash(): HumanSection | "" {
   const section = location.hash.slice(2);
-  return ["guide", "topics", "examples", "archive"].includes(section)
+  return ["guide", "topics", "examples", "archive", "profile"].includes(section)
     ? (section as HumanSection)
     : "";
 }
@@ -368,6 +593,7 @@ function humanSectionTitle(section: HumanSection) {
     topics: "Explore by Goal",
     examples: "Executable Examples",
     archive: "Technical Archive",
+    profile: "MoonCat Profile Lookup",
   }[section];
 }
 
@@ -396,6 +622,7 @@ function shell(content: string, title = "MoonCat Knowledge Archive") {
     ["Guide", guideHref],
     ["Topics", routeForSection("topics")],
     ["Examples", routeForSection("examples")],
+    ["Profile", routeForSection("profile")],
   ];
   const nav = navItems
     .map(([label, href], index) => `<a href="${href}"><span>0${index + 1}</span>${label}</a>`)
@@ -438,9 +665,9 @@ function shell(content: string, title = "MoonCat Knowledge Archive") {
           <a class="panel-4" href="${routeForSection("topics")}">04<span class="hop">-TOPICS</span></a>
           <a class="panel-5" href="${routeForSection("examples")}">05<span class="hop">-EXAMPLES</span></a>
           <a class="panel-6" href="${routeForSection("archive")}">06<span class="hop">-ARCHIVE</span></a>
-          <div class="panel-7">07<span class="hop">-${String(fileCount).padStart(3, "0")}</span></div>
-          <div class="panel-8">08<span class="hop">-READ ONLY</span></div>
-          <div class="panel-9">09<span class="hop">-ARCHIVE</span></div>
+          <a class="panel-7" href="${routeForSection("profile")}">07<span class="hop">-PROFILE</span></a>
+          <a class="panel-8" href="${routeFor("docs/reference-policy.md")}">08<span class="hop">-SOURCES</span></a>
+          <a class="panel-9" href="${routeFor("CONTRIBUTING.md")}">09<span class="hop">-CONTRIBUTE</span></a>
         </div>
         <div class="panel-10">10<span class="hop">-MCKB</span></div>
       </aside>
@@ -488,7 +715,7 @@ function humanPage(section: HumanSection) {
     );
   if (section === "topics")
     return shell(
-      `<section class="curated-page"><p class="eyebrow">HUMAN ENTRYPOINT // TOPICS</p><h1>Explore by goal</h1><p class="curated-lede">Choose a starting point by what you want to understand or build. Each card routes to an existing source document.</p>${curatedCards(LIBRARY_TOPICS)}<div class="curated-actions"><a class="curated-secondary" href="${routeForSection("guide")}"><strong>Read the human guide</strong><small>Get the archive's orientation and boundaries.</small></a><a class="curated-secondary" href="${routeForSection("archive")}"><strong>Open all records</strong><small>Browse the complete generated file tree.</small></a></div></section>`,
+      `<section class="curated-page"><p class="eyebrow">HUMAN ENTRYPOINT // TOPICS</p><h1>Explore by goal</h1><p class="curated-lede">Choose a starting point by what you want to understand or build. Each card routes to an existing source document.</p><div class="curated-actions"><a class="curated-primary" href="${routeForSection("profile")}"><strong>Look up one MoonCat</strong><small>Resolve a rescue order or bytes5 Cat ID from the static population.</small></a></div>${curatedCards(LIBRARY_TOPICS)}<div class="curated-actions"><a class="curated-secondary" href="${routeForSection("guide")}"><strong>Read the human guide</strong><small>Get the archive's orientation and boundaries.</small></a><a class="curated-secondary" href="${routeForSection("archive")}"><strong>Open all records</strong><small>Browse the complete generated file tree.</small></a></div></section>`,
       humanSectionTitle(section),
     );
   if (section === "examples")
@@ -496,6 +723,7 @@ function humanPage(section: HumanSection) {
       `<section class="curated-page"><p class="eyebrow">HUMAN ENTRYPOINT // EXAMPLES</p><h1>Executable examples</h1><p class="curated-lede">Small, local examples that demonstrate bounded ways to use the KB without adding a live service or competing dataset.</p>${curatedCards(LIBRARY_EXAMPLES, "curated-grid examples-grid")}<div class="curated-actions"><a class="curated-secondary" href="${routeForSection("guide")}"><strong>Read the human guide</strong><small>Choose a goal before opening an implementation.</small></a><a class="curated-secondary" href="${routeForSection("archive")}"><strong>Open all records</strong><small>Find supporting docs and data in the technical tree.</small></a></div></section>`,
       humanSectionTitle(section),
     );
+  if (section === "profile") return profilePage();
   return shell(
     `<section class="curated-page"><p class="eyebrow">SECONDARY VIEW // COMPLETE FILE TREE</p><h1>Technical archive</h1><p class="curated-lede">All generated Markdown, JSON, and text records remain available in the archive browser at left. Use search or the tree when you already know the file or need technical detail.</p><div class="curated-actions"><a class="curated-primary" href="${routeForSection("guide")}"><strong>Return to human guide</strong><small>Start with a goal-oriented route.</small></a><a class="curated-secondary" href="${routeForSection("topics")}"><strong>Browse curated topics</strong><small>Use the human-facing entrypoints.</small></a></div></section>`,
     humanSectionTitle(section),
@@ -507,7 +735,7 @@ function home() {
     ? `SOURCE COMMIT ${manifest.source.commit.slice(0, 12)}`
     : "SOURCE COMMIT UNAVAILABLE";
   return shell(
-    `<section class="home-hero"><p class="eyebrow">MOONCAT DAO // HUMAN-FIRST KNOWLEDGE SYSTEM</p><h1>MoonCat Knowledge Archive</h1><p>A read-only library for people who want a useful starting point before opening the complete technical record set.</p><div class="home-meta"><span>${manifest?.fileCount ?? 0} PUBLISHABLE RECORDS</span><span>${source}</span></div></section><section class="guide-spotlight"><p class="eyebrow">PRIMARY STARTING POINT</p><h2>Using MoonCat KB</h2><p>Begin with the goal-oriented guide, then follow a curated topic or example into the source-backed archive.</p>${guideLinkMarkup()}<div class="spotlight-links"><a href="${routeForSection("topics")}">Explore by goal <span>→</span></a><a href="${routeForSection("examples")}">Open examples <span>→</span></a><a href="${routeForSection("archive")}">Technical archive <span>→</span></a></div></section><section class="home-topic-preview"><div><p class="eyebrow">CURATED TOPICS</p><h2>Where do you want to go?</h2></div><div class="topic-preview-grid">${LIBRARY_TOPICS.slice(0, 6).map((link) => linkMarkup(link, "topic-preview-link")).filter(Boolean).join("")}</div><a class="curated-secondary" href="${routeForSection("topics")}"><strong>See all topics</strong><small>Browse the complete goal-oriented index.</small></a></section>`,
+    `<section class="home-hero"><p class="eyebrow">MOONCAT DAO // HUMAN-FIRST KNOWLEDGE SYSTEM</p><h1>MoonCat Knowledge Archive</h1><p>A read-only library for people who want a useful starting point before opening the complete technical record set.</p><div class="home-meta"><span>${manifest?.fileCount ?? 0} PUBLISHABLE RECORDS</span><span>${source}</span></div></section><section class="guide-spotlight"><p class="eyebrow">PRIMARY STARTING POINT</p><h2>Using MoonCat KB</h2><p>Begin with the goal-oriented guide, then follow a curated topic or example into the source-backed archive.</p>${guideLinkMarkup()}<div class="spotlight-links"><a href="${routeForSection("topics")}">Explore by goal <span>→</span></a><a href="${routeForSection("examples")}">Open examples <span>→</span></a><a href="${routeForSection("profile")}">Profile lookup <span>→</span></a><a href="${routeForSection("archive")}">Technical archive <span>→</span></a></div></section><section class="home-topic-preview"><div><p class="eyebrow">CURATED TOPICS</p><h2>Where do you want to go?</h2></div><div class="topic-preview-grid">${LIBRARY_TOPICS.slice(0, 6).map((link) => linkMarkup(link, "topic-preview-link")).filter(Boolean).join("")}</div><a class="curated-secondary" href="${routeForSection("topics")}"><strong>See all topics</strong><small>Browse the complete goal-oriented index.</small></a></section>`,
   );
 }
 
@@ -750,6 +978,29 @@ function bindPage() {
   document
     .querySelectorAll<HTMLAnchorElement>("[data-search-result]")
     .forEach((result) => result.addEventListener("click", () => clearSearch()));
+  const profileForm = document.querySelector<HTMLFormElement>("[data-profile-form]");
+  const profileSelect = document.querySelector<HTMLSelectElement>("[data-profile-kind]");
+  const profileInputElement = document.querySelector<HTMLInputElement>("[data-profile-input]");
+  profileSelect?.addEventListener("change", () => {
+    profileKind = profileSelect.value === "catIdBytes5" ? "catIdBytes5" : "rescueOrder";
+    profileInput = profileInputElement?.value ?? "";
+    profileResult = null;
+    profileError = "";
+    void render(true);
+  });
+  profileForm?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    profileKind = profileSelect?.value === "catIdBytes5" ? "catIdBytes5" : "rescueOrder";
+    profileInput = profileInputElement?.value ?? "";
+    void lookupProfile().then(() => {
+      if (sectionFromHash() === "profile") void render(true);
+    });
+  });
+  if (sectionFromHash() === "profile" && profileLookupState === "idle") {
+    void loadProfileLookup().then(() => {
+      if (sectionFromHash() === "profile") void render(true);
+    });
+  }
 }
 
 async function render(preserveMode = false) {

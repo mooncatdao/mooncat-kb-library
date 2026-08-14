@@ -156,6 +156,50 @@ function searchTextFor(file) {
   return text.slice(0, maxSearchTextLength);
 }
 
+function buildProfileLookup() {
+  const manifestPath = join(kbRoot, 'data', 'mooncat-population', 'manifest.json');
+  if (!existsSync(manifestPath)) return null;
+  try {
+    const populationManifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    const shards = populationManifest?.layout?.shards;
+    if (populationManifest?.rowCount !== 25440 || !Array.isArray(shards)) return null;
+    const catIdToRescueOrder = {};
+    let rowCount = 0;
+    for (const shard of shards) {
+      if (typeof shard?.path !== 'string') return null;
+      const shardPath = join(kbRoot, shard.path);
+      const shardData = JSON.parse(readFileSync(shardPath, 'utf8'));
+      if (!Array.isArray(shardData?.rows)) return null;
+      for (const row of shardData.rows) {
+        if (
+          typeof row?.catId !== 'string' ||
+          !/^0x[0-9a-f]{10}$/.test(row.catId) ||
+          !Number.isInteger(row.rescueOrder) ||
+          row.rescueOrder < 0 ||
+          row.rescueOrder > 25439
+        ) return null;
+        if (Object.prototype.hasOwnProperty.call(catIdToRescueOrder, row.catId)) return null;
+        catIdToRescueOrder[row.catId] = row.rescueOrder;
+        rowCount += 1;
+      }
+    }
+    if (rowCount !== populationManifest.rowCount) return null;
+    return {
+      version: 1,
+      rowCount,
+      populationManifestPath: 'data/mooncat-population/manifest.json',
+      shards: shards.map((shard) => ({
+        path: shard.path,
+        startRescueOrder: shard.startRescueOrder,
+        endRescueOrder: shard.endRescueOrder,
+      })),
+      catIdToRescueOrder,
+    };
+  } catch {
+    return null;
+  }
+}
+
 rmSync(outputRoot, { recursive: true, force: true });
 mkdirSync(contentRoot, { recursive: true });
 const tree = makeFolder('', '');
@@ -203,4 +247,8 @@ writeFileSync(join(outputRoot, 'search-index.json'), `${JSON.stringify({
     ...(presentationByPath.get(file.path) || {}),
   })),
 }, null, 2)}\n`);
+const profileLookup = buildProfileLookup();
+if (profileLookup) {
+  writeFileSync(join(outputRoot, 'profile-lookup.json'), `${JSON.stringify(profileLookup)}\n`);
+}
 console.log(`Generated ${files.length} KB files from ${kbRoot}`);

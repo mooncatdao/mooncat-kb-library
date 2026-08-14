@@ -30,6 +30,18 @@ The curated navigation is presentation metadata only. It does not copy MoonCat
 facts into this application, and it gracefully falls back to available archive
 files if an expected guide or topic destination is absent.
 
+The `#/profile` route is a human-facing static MoonCat lookup. It requires an
+explicit rescue order (`0..25439`) or bytes5 Cat ID (`0x` plus 10 hexadecimal
+digits), then reads one generated lookup index and the relevant local
+population shard. `npm run generate:kb` creates the gitignored
+`public/kb/profile-lookup.json` index deterministically from the sibling
+`data/mooncat-population/manifest.json` and its shards; it does not create a
+second population dataset. The displayed row preserves the generated fields,
+including a finalized name only when the row already contains one. The profile
+view is a static snapshot and makes no claims about current ownership,
+accessories, markets, live chain/API state, provisional names, or complete name
+history.
+
 ## KB generation
 
 Run the generator directly with:
