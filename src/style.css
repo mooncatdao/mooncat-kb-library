@@ -973,7 +973,7 @@ p {
 .guide-spotlight {
   padding: 1rem 1.1rem;
   border-left: 9px solid var(--butterscotch);
-  background: #21172a;
+  background: transparent;
 }
 
 .guide-spotlight h2,
