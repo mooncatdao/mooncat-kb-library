@@ -729,6 +729,7 @@ function shell(content: string, title = "MoonCat Knowledge Archive") {
         <footer class="site-footer"><span>MOONCAT KB // READ-ONLY PRESENTATION LAYER</span><span>LCARS Inspired Website Template by <a href="https://www.thelcars.com/" target="_blank" rel="noreferrer">www.TheLCARS.com</a>.</span></footer>
       </div>
     </div>
+    <button type="button" class="screen-top" data-screen-top aria-hidden="true">SCREEN TOP</button>
   </section>`;
 }
 
@@ -1028,6 +1029,13 @@ function setArchiveBrowserOpen(open: boolean) {
     ?.classList.toggle("archive-browser-hidden", !open);
 }
 
+function updateScreenTopVisibility() {
+  const control = document.querySelector<HTMLButtonElement>("[data-screen-top]");
+  const visible = window.scrollY > 500;
+  control?.classList.toggle("is-visible", visible);
+  control?.setAttribute("aria-hidden", String(!visible));
+}
+
 function bindPage() {
   document
     .querySelector<HTMLButtonElement>("[data-back-control]")
@@ -1103,6 +1111,15 @@ function bindPage() {
     }),
   );
   document
+    .querySelector<HTMLButtonElement>("[data-screen-top]")
+    ?.addEventListener("click", () => {
+      const behavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches
+        ? "auto"
+        : "smooth";
+      window.scrollTo({ top: 0, left: 0, behavior });
+      updateScreenTopVisibility();
+    });
+  document
     .querySelectorAll<HTMLAnchorElement>("[data-search-result]")
     .forEach((result) => result.addEventListener("click", () => clearSearch()));
   const profileForm = document.querySelector<HTMLFormElement>("[data-profile-form]");
@@ -1154,6 +1171,7 @@ async function render(preserveMode = false) {
   document
     .querySelector<HTMLElement>("#content")
     ?.focus({ preventScroll: true });
+  updateScreenTopVisibility();
 }
 
 async function start() {
@@ -1169,6 +1187,7 @@ async function start() {
   }
   void loadSearchIndex();
   document.addEventListener("click", rememberInternalRouteClick);
+  window.addEventListener("scroll", updateScreenTopVisibility, { passive: true });
   window.addEventListener("hashchange", () => {
     reconcileRouteHistory();
     const keepArchiveBrowserOpen =
@@ -1176,6 +1195,7 @@ async function start() {
     if (!keepArchiveBrowserOpen) setArchiveBrowserOpen(false);
     void render().then(() => {
       window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+      updateScreenTopVisibility();
       const shouldFocusArchiveSearch = archiveSearchFocusPending;
       archiveSearchFocusPending = false;
       if (shouldFocusArchiveSearch && sectionFromHash() === "archive") {
