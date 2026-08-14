@@ -101,6 +101,7 @@ let searchIndexState: "idle" | "loading" | "ready" | "failed" = "idle";
 let searchIndexPromise: Promise<void> | null = null;
 let searchQuery = "";
 let searchScope: SearchScope = "all";
+let archiveBrowserOpen = false;
 let archiveTreeScrollTop = 0;
 let profileLookup: ProfileLookupArtifact | null = null;
 let profileLookupState: "idle" | "loading" | "ready" | "failed" = "idle";
@@ -687,9 +688,13 @@ function shell(content: string, title = "MoonCat Knowledge Archive") {
   const library = manifest
     ? `<aside class="library-browser" aria-label="Knowledge archive browser">${searchControlMarkup()}<details class="library-drawer" open><summary><span>Technical archive · all records</span><small>${fileCount}</small></summary><div class="library-tree-scroll">${renderTree(manifest.tree)}</div></details></aside>`
     : "";
-  const workspaceClass = sectionFromHash() === "archive"
-    ? "library-workspace archive-first"
-    : "library-workspace";
+  const workspaceClass = [
+    "library-workspace",
+    sectionFromHash() === "archive" ? "archive-first" : "",
+    archiveBrowserOpen ? "" : "archive-browser-hidden",
+  ]
+    .filter(Boolean)
+    .join(" ");
   return `<section class="wrap-standard" id="column-3">
     <div class="wrap shell-header-row">
       <div class="left-frame-top">
@@ -709,7 +714,7 @@ function shell(content: string, title = "MoonCat Knowledge Archive") {
       <aside class="left-frame" aria-label="Archive sections">
         <div class="frame-panels">
           <button type="button" class="panel-3" data-back-control aria-label="Back to previous library page">03<span class="hop" aria-hidden="true"><i>-</i>BACK</span></button>
-          <a class="panel-4" href="${routeForSection("archive")}" data-left-action="data">04<span class="hop"><i aria-hidden="true">-</i>DATA</span></a>
+          <a class="panel-4" href="${routeForSection("archive")}" data-left-action="search">04<span class="hop"><i aria-hidden="true">-</i>SEARCH</span></a>
           <a class="panel-5" href="${routeFor("docs/contract-abi-event-registry.md")}">05<span class="hop"><i aria-hidden="true">-</i>CONTRACTS</span></a>
           <a class="panel-6" href="${routeFor("docs/reference-policy.md")}">06<span class="hop"><i aria-hidden="true">-</i>SOURCES</span></a>
           <a class="panel-7" href="${routeFor("data/kb-gap-index.json")}">07<span class="hop"><i aria-hidden="true">-</i>GAPS</span></a>
@@ -1016,6 +1021,13 @@ function focusArchiveSearch() {
   document.querySelector<HTMLInputElement>("#library-search-input")?.focus();
 }
 
+function setArchiveBrowserOpen(open: boolean) {
+  archiveBrowserOpen = open;
+  document
+    .querySelector<HTMLElement>(".library-workspace")
+    ?.classList.toggle("archive-browser-hidden", !open);
+}
+
 function bindPage() {
   document
     .querySelector<HTMLButtonElement>("[data-back-control]")
@@ -1057,6 +1069,7 @@ function bindPage() {
     link.addEventListener("click", (event) => {
       const action = link.dataset.topAction;
       if (action === "search") {
+        setArchiveBrowserOpen(true);
         if (currentRoute() === routeForSection("archive")) {
           archiveSearchFocusPending = false;
           event.preventDefault();
@@ -1066,6 +1079,7 @@ function bindPage() {
         }
       } else if (action === "archive") {
         archiveSearchFocusPending = false;
+        setArchiveBrowserOpen(false);
         searchScope = "all";
         if (currentRoute() === routeForSection("archive")) {
           event.preventDefault();
@@ -1075,9 +1089,9 @@ function bindPage() {
       }
     }),
   );
-  document.querySelectorAll<HTMLAnchorElement>("[data-left-action='data']").forEach((link) =>
+  document.querySelectorAll<HTMLAnchorElement>("[data-left-action='search']").forEach((link) =>
     link.addEventListener("click", (event) => {
-      searchScope = "data";
+      setArchiveBrowserOpen(true);
       if (currentRoute() === routeForSection("archive")) {
         event.preventDefault();
         updateSearchScopeControls();
@@ -1157,6 +1171,9 @@ async function start() {
   document.addEventListener("click", rememberInternalRouteClick);
   window.addEventListener("hashchange", () => {
     reconcileRouteHistory();
+    const keepArchiveBrowserOpen =
+      archiveSearchFocusPending && sectionFromHash() === "archive";
+    if (!keepArchiveBrowserOpen) setArchiveBrowserOpen(false);
     void render().then(() => {
       window.scrollTo({ top: 0, left: 0, behavior: "auto" });
       const shouldFocusArchiveSearch = archiveSearchFocusPending;

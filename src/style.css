@@ -516,6 +516,17 @@ main {
   grid-area: browser;
 }
 
+@media (min-width: 901px) {
+  .library-workspace.archive-browser-hidden {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "content";
+  }
+
+  .library-workspace.archive-browser-hidden .library-browser {
+    display: none;
+  }
+}
+
 .library-search {
   margin-bottom: 10px;
   padding: 0.65rem;
