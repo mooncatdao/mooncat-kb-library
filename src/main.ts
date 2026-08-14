@@ -71,6 +71,7 @@ let searchIndexState: "idle" | "loading" | "ready" | "failed" = "idle";
 let searchIndexPromise: Promise<void> | null = null;
 let searchQuery = "";
 let searchScope: SearchScope = "all";
+let archiveTreeScrollTop = 0;
 
 const escapeHtml = (value: string) =>
   value.replace(
@@ -754,6 +755,8 @@ function bindPage() {
 async function render(preserveMode = false) {
   activePath = pathFromHash();
   if (!preserveMode) rawMode = false;
+  const currentTree = app?.querySelector<HTMLElement>(".library-tree-scroll");
+  if (currentTree) archiveTreeScrollTop = currentTree.scrollTop;
   if (!manifest) {
     app!.innerHTML = shell(
       `<section class="error-state"><h1>Archive manifest unavailable</h1><p>Run <code>npm run generate:kb</code> to create the publishable knowledge-base content.</p></section>`,
@@ -768,6 +771,8 @@ async function render(preserveMode = false) {
       ? humanPage(section)
       : home();
   bindPage();
+  const nextTree = app?.querySelector<HTMLElement>(".library-tree-scroll");
+  if (nextTree) nextTree.scrollTop = archiveTreeScrollTop;
   document
     .querySelector<HTMLElement>("#content")
     ?.focus({ preventScroll: true });
