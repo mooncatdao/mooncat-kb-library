@@ -156,6 +156,60 @@ function searchTextFor(file) {
   return text.slice(0, maxSearchTextLength);
 }
 
+function buildRenderLookup() {
+  const manifestPath = join(kbRoot, 'data', 'mooncat-renders', 'manifest.json');
+  if (!existsSync(manifestPath)) return null;
+  try {
+    const renderManifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    const shards = renderManifest?.layout?.shards;
+    const encoding = renderManifest?.encoding;
+    if (
+      renderManifest?.rowCount !== 25440 ||
+      renderManifest?.layout?.kind !== 'fixed-rescue-order-shards' ||
+      !Array.isArray(shards) ||
+      shards.length !== 26 ||
+      renderManifest?.layout?.shardCount !== 26 ||
+      encoding?.id !== 'palette-index-nibble-base64-v1'
+    ) return null;
+    const normalizedShards = shards.map((shard) => {
+      if (
+        typeof shard?.path !== 'string' ||
+        !shard.path.startsWith('data/mooncat-renders/shards/') ||
+        shard.path.split('/').includes('..') ||
+        !Number.isInteger(shard.startRescueOrder) ||
+        !Number.isInteger(shard.endRescueOrder) ||
+        !Number.isInteger(shard.rowCount) ||
+        shard.startRescueOrder < 0 ||
+        shard.endRescueOrder > 25439 ||
+        shard.startRescueOrder > shard.endRescueOrder ||
+        shard.rowCount !== shard.endRescueOrder - shard.startRescueOrder + 1 ||
+        !existsSync(join(kbRoot, shard.path))
+      ) throw new Error('Invalid render shard metadata');
+      return {
+        path: shard.path,
+        startRescueOrder: shard.startRescueOrder,
+        endRescueOrder: shard.endRescueOrder,
+      };
+    });
+    normalizedShards.sort((left, right) => left.startRescueOrder - right.startRescueOrder);
+    if (
+      normalizedShards[0]?.startRescueOrder !== 0 ||
+      normalizedShards.at(-1)?.endRescueOrder !== 25439 ||
+      normalizedShards.some((shard, index) =>
+        index > 0 && shard.startRescueOrder !== normalizedShards[index - 1].endRescueOrder + 1,
+      )
+    ) return null;
+    return {
+      manifestPath: 'data/mooncat-renders/manifest.json',
+      rowCount: 25440,
+      encoding: 'palette-index-nibble-base64-v1',
+      shards: normalizedShards,
+    };
+  } catch {
+    return null;
+  }
+}
+
 function buildProfileLookup() {
   const manifestPath = join(kbRoot, 'data', 'mooncat-population', 'manifest.json');
   if (!existsSync(manifestPath)) return null;
@@ -184,6 +238,7 @@ function buildProfileLookup() {
       }
     }
     if (rowCount !== populationManifest.rowCount) return null;
+    const render = buildRenderLookup();
     return {
       version: 1,
       rowCount,
@@ -194,6 +249,7 @@ function buildProfileLookup() {
         endRescueOrder: shard.endRescueOrder,
       })),
       catIdToRescueOrder,
+      ...(render ? { render } : {}),
     };
   } catch {
     return null;

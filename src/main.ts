@@ -6,6 +6,7 @@ import {
   LIBRARY_TOPICS,
   type LibraryLink,
 } from "./library-sections";
+import { renderMooncatSvg } from "./mooncat-render";
 import "./style.css";
 
 type FileType = "markdown" | "json" | "text";
@@ -62,12 +63,19 @@ type ProfileShard = {
   startRescueOrder: number;
   endRescueOrder: number;
 };
+type ProfileRenderLookup = {
+  manifestPath: string;
+  rowCount: number;
+  encoding: "palette-index-nibble-base64-v1";
+  shards: ProfileShard[];
+};
 type ProfileLookupArtifact = {
   version: number;
   rowCount: number;
   populationManifestPath: string;
   shards: ProfileShard[];
   catIdToRescueOrder: Record<string, number>;
+  render?: ProfileRenderLookup;
 };
 type MooncatProfileRow = {
   catId: string;
@@ -84,6 +92,12 @@ type ProfileResult = {
   value: string;
   normalizedValue: string;
   row: MooncatProfileRow;
+  shard: ProfileShard;
+  render?: ProfileRenderResult;
+  renderError?: string;
+};
+type ProfileRenderResult = {
+  svg: string;
   shard: ProfileShard;
 };
 
@@ -370,7 +384,7 @@ async function loadSearchIndex() {
 function isProfileLookupArtifact(value: unknown): value is ProfileLookupArtifact {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const artifact = value as Partial<ProfileLookupArtifact>;
-  return (
+  const validPopulation = (
     artifact.version === 1 &&
     artifact.rowCount === 25440 &&
     artifact.populationManifestPath === "data/mooncat-population/manifest.json" &&
@@ -387,6 +401,23 @@ function isProfileLookupArtifact(value: unknown): value is ProfileLookupArtifact
     !!artifact.catIdToRescueOrder &&
     typeof artifact.catIdToRescueOrder === "object" &&
     !Array.isArray(artifact.catIdToRescueOrder)
+  );
+  if (!validPopulation) return false;
+  if (artifact.render === undefined || artifact.render === null) return true;
+  return (
+    artifact.render.manifestPath === "data/mooncat-renders/manifest.json" &&
+    artifact.render.rowCount === 25440 &&
+    artifact.render.encoding === "palette-index-nibble-base64-v1" &&
+    Array.isArray(artifact.render.shards) &&
+    artifact.render.shards.length > 0 &&
+    artifact.render.shards.every(
+      (shard) =>
+        typeof shard === "object" &&
+        shard !== null &&
+        typeof shard.path === "string" &&
+        typeof shard.startRescueOrder === "number" &&
+        typeof shard.endRescueOrder === "number",
+    )
   );
 }
 
@@ -411,6 +442,13 @@ async function loadProfileLookup() {
 
 function profileShardForOrder(rescueOrder: number) {
   return profileLookup?.shards.find(
+    (shard) =>
+      rescueOrder >= shard.startRescueOrder && rescueOrder <= shard.endRescueOrder,
+  );
+}
+
+function profileRenderShardForOrder(rescueOrder: number) {
+  return profileLookup?.render?.shards.find(
     (shard) =>
       rescueOrder >= shard.startRescueOrder && rescueOrder <= shard.endRescueOrder,
   );
@@ -449,6 +487,34 @@ async function readProfileRow(shard: ProfileShard, rescueOrder: number, catId?: 
   });
   if (!isProfileRow(row)) throw new Error("Population row unavailable");
   return row;
+}
+
+async function readProfileRender(
+  shard: ProfileShard,
+  rescueOrder: number,
+  catId: string,
+  caption: string,
+) {
+  const response = await fetch(
+    `./kb/content/${shard.path.split("/").map(encodeURIComponent).join("/")}`,
+  );
+  if (!response.ok) throw new Error(`Request returned ${response.status}`);
+  const payload: unknown = await response.json();
+  if (!payload || typeof payload !== "object" || !Array.isArray((payload as { rows?: unknown }).rows))
+    throw new Error("Render shard has no rows");
+  const row = (payload as { rows: unknown[] }).rows.find(
+    (candidate) =>
+      !!candidate &&
+      typeof candidate === "object" &&
+      !Array.isArray(candidate) &&
+      (candidate as { rescueOrder?: unknown }).rescueOrder === rescueOrder &&
+      (candidate as { catId?: unknown }).catId === catId,
+  );
+  if (!row) throw new Error("Render row unavailable");
+  return {
+    svg: renderMooncatSvg(row, caption),
+    shard,
+  };
 }
 
 async function lookupProfile() {
@@ -498,12 +564,32 @@ async function lookupProfile() {
       return;
     }
     const row = await readProfileRow(shard, rescueOrder, normalizedCatId);
+    const renderCaption =
+      row.name && typeof row.name.text === "string" && row.name.text.trim()
+        ? row.name.text.trim()
+        : row.catId;
+    const renderShard = profileRenderShardForOrder(rescueOrder);
+    let render: ProfileRenderResult | undefined;
+    let renderError: string | undefined;
+    if (profileLookup.render) {
+      if (!renderShard) {
+        renderError = "No parser-derived render shard covers this rescue order.";
+      } else {
+        try {
+          render = await readProfileRender(renderShard, rescueOrder, row.catId, renderCaption);
+        } catch {
+          renderError = "The parser-derived render is unavailable for this profile.";
+        }
+      }
+    }
     profileResult = {
       kind: profileKind,
       value: rawValue,
       normalizedValue,
       row,
       shard,
+      render,
+      renderError,
     };
   } catch {
     profileError = "The static population row could not be loaded from the generated KB.";
@@ -536,17 +622,38 @@ function profileSourceLink(path: string, label: string) {
     : `<span>${escapeHtml(label)}</span>`;
 }
 
+function profileImageMarkup(
+  row: MooncatProfileRow,
+  render: ProfileRenderResult | undefined,
+  renderError: string | undefined,
+) {
+  const caption =
+    row.name && typeof row.name.text === "string" && row.name.text.trim()
+      ? row.name.text.trim()
+      : row.catId;
+  if (!render) {
+    return renderError
+      ? `<p class="profile-render-unavailable" role="status">${escapeHtml(renderError)} Render provenance remains available below.</p>`
+      : "";
+  }
+  return `<figure class="image-frame profile-image-frame"><figcaption class="imgf-title"><div class="h4-wrapper"><h4>${escapeHtml(caption)}</h4></div></figcaption><div class="imgf-image-body"><div class="image-holder">${render.svg}</div></div><div class="imgf-base" aria-hidden="true"><div class="imgf-block-1"></div><div class="imgf-block-2"></div><div class="imgf-block-3"></div><div class="imgf-block-4"></div><div class="imgf-block-5"></div></div></figure>`;
+}
+
 function profileResultMarkup() {
   if (profileRequestState === "loading") return '<p class="profile-status">Loading the static population row…</p>';
   if (profileLookupState === "failed" && !profileResult) return '<p class="profile-error" role="alert">The generated static profile index is unavailable. Open the archive or regenerate the KB artifacts.</p>';
   if (profileError) return `<p class="profile-error" role="alert">${escapeHtml(profileError)}</p>`;
   if (!profileResult) return '<p class="profile-muted">Enter an explicit identifier to resolve one static population row.</p>';
-  const { row, shard } = profileResult;
+  const { row, shard, render, renderError } = profileResult;
   const nameText = row.name && typeof row.name.text === "string" ? row.name.text : "Unnamed in the pinned finalized snapshot";
   const nameMeta = row.name
     ? `<small>FINALIZED SNAPSHOT · ${row.name.namedYear ? `NAMED ${profileValue(row.name.namedYear)}` : "RECORDED NAME"}</small>`
     : `<small>NAME FIELD IS NULL IN THE PINNED FINALIZED SNAPSHOT</small>`;
-  return `<article class="profile-result"><header class="profile-result-header"><p class="eyebrow">STATIC POPULATION ROW</p><h2>${escapeHtml(nameText)}</h2><p class="profile-result-id"><code>${escapeHtml(row.catId)}</code><span>RESCUE ORDER ${row.rescueOrder}</span></p>${nameMeta}</header><div class="profile-field-grid"><section class="profile-field"><h3>Identity</h3><dl>${profileObjectFields({ catId: row.catId, rescueOrder: row.rescueOrder })}</dl></section><section class="profile-field"><h3>Traits</h3><dl>${profileObjectFields(row.traits)}</dl></section><section class="profile-field"><h3>Color classification</h3><dl>${profileObjectFields(row.color)}</dl><p class="profile-muted">Display classification only; not an on-chain trait, palette, rarity, or rendering proof.</p></section><section class="profile-field"><h3>Membership</h3><dl><div><dt>Genesis</dt><dd>${profileValue(row.genesis)}</dd></div></dl><h4>Rescue buckets</h4>${profileList(row.rescueBuckets)}<h4>Character categories</h4>${profileList(row.characterCategories)}</section></div><aside class="profile-provenance"><h3>Static provenance boundary</h3><p>This profile is read from the generated MoonCat KB population snapshot. It does not establish current ownership, accessory state, market state, live chain/API state, provisional naming, or complete naming history.</p><p class="profile-links">${profileSourceLink("docs/mooncat-population-index.md", "Population index")}${profileSourceLink("docs/identifier-conventions.md", "Identifier conventions")}${profileSourceLink("data/mooncat-population/manifest.json", "Population manifest")}${profileSourceLink(shard.path, "Underlying shard")}</p></aside></article>`;
+  const renderFrame = profileImageMarkup(row, render, renderError);
+  const renderManifestLink = profileLookup?.render
+    ? profileSourceLink(profileLookup.render.manifestPath, "Render manifest")
+    : "";
+  return `<article class="profile-result"><div class="profile-result-top"><header class="profile-result-header"><p class="eyebrow">STATIC POPULATION ROW</p><h2>${escapeHtml(nameText)}</h2><p class="profile-result-id"><code>${escapeHtml(row.catId)}</code><span>RESCUE ORDER ${row.rescueOrder}</span></p>${nameMeta}</header>${renderFrame}</div><div class="profile-field-grid"><section class="profile-field"><h3>Identity</h3><dl>${profileObjectFields({ catId: row.catId, rescueOrder: row.rescueOrder })}</dl></section><section class="profile-field"><h3>Traits</h3><dl>${profileObjectFields(row.traits)}</dl></section><section class="profile-field"><h3>Color classification</h3><dl>${profileObjectFields(row.color)}</dl><p class="profile-muted">Display classification only; not an on-chain trait, palette, rarity, or rendering proof.</p></section><section class="profile-field"><h3>Membership</h3><dl><div><dt>Genesis</dt><dd>${profileValue(row.genesis)}</dd></div></dl><h4>Rescue buckets</h4>${profileList(row.rescueBuckets)}<h4>Character categories</h4>${profileList(row.characterCategories)}</section></div><aside class="profile-provenance"><h3>Static provenance boundary</h3><p>This profile is read from the generated MoonCat KB population snapshot. The image, when present, is deterministic parser-derived static render data; it does not establish current ownership, accessory state, market state, live chain/API state, provisional naming, or exact on-chain SVG serialization.</p><p class="profile-links">${profileSourceLink("docs/mooncat-population-index.md", "Population index")}${profileSourceLink("docs/identifier-conventions.md", "Identifier conventions")}${profileSourceLink("data/mooncat-population/manifest.json", "Population manifest")}${renderManifestLink}${profileSourceLink(shard.path, "Underlying shard")}${render ? profileSourceLink(render.shard.path, "Render shard") : ""}</p></aside></article>`;
 }
 
 function profilePage() {
