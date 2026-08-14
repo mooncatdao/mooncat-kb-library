@@ -112,6 +112,7 @@ let profileError = "";
 let profileRequestState: "idle" | "loading" = "idle";
 const inAppRouteHistory: string[] = [];
 let internalRouteClickPending = false;
+let archiveSearchFocusPending = false;
 
 const escapeHtml = (value: string) =>
   value.replace(
@@ -656,16 +657,19 @@ function shell(content: string, title = "MoonCat Knowledge Archive") {
   const fileCount = manifest?.fileCount ?? 0;
   const guidePath = guideDestination();
   const guideHref = guidePath ? routeFor(guidePath) : routeForSection("guide");
-  const navItems = [
-    ["Home", "#/"],
+  const navItems: [string, string, string?][] = [
     ["Guide", guideHref],
     ["Topics", routeForSection("topics")],
     ["Examples", routeForSection("examples")],
     ["Profile", routeForSection("profile")],
-    ["Archive", routeForSection("archive")],
+    ["Search", routeForSection("archive"), "search"],
+    ["Archive", routeForSection("archive"), "archive"],
   ];
   const nav = navItems
-    .map(([label, href], index) => `<a href="${href}"><span>0${index + 1}</span>${label}</a>`)
+    .map(
+      ([label, href, action], index) =>
+        `<a href="${href}"${action ? ` data-top-action="${action}"` : ""}><span>0${index + 1}</span>${label}</a>`,
+    )
     .join("");
   const cascade = [
     ["93", "1853", "24109", "7024", "322", "4149", "86"],
@@ -705,12 +709,12 @@ function shell(content: string, title = "MoonCat Knowledge Archive") {
       <aside class="left-frame" aria-label="Archive sections">
         <div class="frame-panels">
           <button type="button" class="panel-3" data-back-control aria-label="Back to previous library page">03<span class="hop" aria-hidden="true"><i>-</i>BACK</span></button>
-          <a class="panel-4" href="${guideHref}">04<span class="hop"><i aria-hidden="true">-</i>GUIDE</span></a>
-          <a class="panel-5" href="${routeForSection("topics")}">05<span class="hop"><i aria-hidden="true">-</i>TOPICS</span></a>
-          <a class="panel-6" href="${routeForSection("examples")}">06<span class="hop"><i aria-hidden="true">-</i>EXAMPLES</span></a>
-          <a class="panel-7" href="${routeForSection("archive")}">07<span class="hop"><i aria-hidden="true">-</i>ARCHIVE</span></a>
-          <a class="panel-8" href="${routeForSection("profile")}">08<span class="hop"><i aria-hidden="true">-</i>PROFILE</span></a>
-          <a class="panel-9" href="${routeFor("docs/reference-policy.md")}">09<span class="hop"><i aria-hidden="true">-</i>SOURCES</span></a>
+          <a class="panel-4" href="${routeForSection("archive")}" data-left-action="data">04<span class="hop"><i aria-hidden="true">-</i>DATA</span></a>
+          <a class="panel-5" href="${routeFor("docs/contract-abi-event-registry.md")}">05<span class="hop"><i aria-hidden="true">-</i>CONTRACTS</span></a>
+          <a class="panel-6" href="${routeFor("docs/reference-policy.md")}">06<span class="hop"><i aria-hidden="true">-</i>SOURCES</span></a>
+          <a class="panel-7" href="${routeFor("data/kb-gap-index.json")}">07<span class="hop"><i aria-hidden="true">-</i>GAPS</span></a>
+          <a class="panel-8" href="${routeFor("docs/agent-usage.md")}">08<span class="hop"><i aria-hidden="true">-</i>AGENTS</span></a>
+          <a class="panel-9" href="${routeFor("docs/kb-integrity.md")}">09<span class="hop"><i aria-hidden="true">-</i>INTEGRITY</span></a>
           <a class="panel-10" href="${routeFor("CONTRIBUTING.md")}">10<span class="hop"><i aria-hidden="true">-</i>CONTRIBUTE</span></a>
         </div>
       </aside>
@@ -1002,6 +1006,16 @@ async function filePage(path: string) {
   }
 }
 
+function updateSearchScopeControls() {
+  document.querySelectorAll<HTMLButtonElement>("[data-search-scope]").forEach((button) => {
+    button.classList.toggle("selected", button.dataset.searchScope === searchScope);
+  });
+}
+
+function focusArchiveSearch() {
+  document.querySelector<HTMLInputElement>("#library-search-input")?.focus();
+}
+
 function bindPage() {
   document
     .querySelector<HTMLButtonElement>("[data-back-control]")
@@ -1035,10 +1049,43 @@ function bindPage() {
   document.querySelectorAll<HTMLButtonElement>("[data-search-scope]").forEach((button) =>
     button.addEventListener("click", () => {
       searchScope = (button.dataset.searchScope as SearchScope) ?? "all";
-      document.querySelectorAll<HTMLButtonElement>("[data-search-scope]").forEach((scopeButton) => {
-        scopeButton.classList.toggle("selected", scopeButton === button);
-      });
+      updateSearchScopeControls();
       updateSearchResults();
+    }),
+  );
+  document.querySelectorAll<HTMLAnchorElement>("[data-top-action]").forEach((link) =>
+    link.addEventListener("click", (event) => {
+      const action = link.dataset.topAction;
+      if (action === "search") {
+        if (currentRoute() === routeForSection("archive")) {
+          archiveSearchFocusPending = false;
+          event.preventDefault();
+          focusArchiveSearch();
+        } else {
+          archiveSearchFocusPending = true;
+        }
+      } else if (action === "archive") {
+        archiveSearchFocusPending = false;
+        searchScope = "all";
+        if (currentRoute() === routeForSection("archive")) {
+          event.preventDefault();
+          updateSearchScopeControls();
+          updateSearchResults();
+        }
+      }
+    }),
+  );
+  document.querySelectorAll<HTMLAnchorElement>("[data-left-action='data']").forEach((link) =>
+    link.addEventListener("click", (event) => {
+      searchScope = "data";
+      if (currentRoute() === routeForSection("archive")) {
+        event.preventDefault();
+        updateSearchScopeControls();
+        updateSearchResults();
+        focusArchiveSearch();
+      } else {
+        archiveSearchFocusPending = true;
+      }
     }),
   );
   document
@@ -1110,7 +1157,14 @@ async function start() {
   document.addEventListener("click", rememberInternalRouteClick);
   window.addEventListener("hashchange", () => {
     reconcileRouteHistory();
-    void render().then(() => window.scrollTo({ top: 0, left: 0, behavior: "auto" }));
+    void render().then(() => {
+      window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+      const shouldFocusArchiveSearch = archiveSearchFocusPending;
+      archiveSearchFocusPending = false;
+      if (shouldFocusArchiveSearch && sectionFromHash() === "archive") {
+        focusArchiveSearch();
+      }
+    });
   });
   window.addEventListener("keydown", (event) => {
     if (
