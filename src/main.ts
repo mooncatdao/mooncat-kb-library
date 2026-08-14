@@ -645,7 +645,7 @@ function profileResultMarkup() {
   if (profileError) return `<p class="profile-error" role="alert">${escapeHtml(profileError)}</p>`;
   if (!profileResult) return '<p class="profile-muted">Enter an explicit identifier to resolve one static population row.</p>';
   const { row, shard, render, renderError } = profileResult;
-  const nameText = row.name && typeof row.name.text === "string" ? row.name.text : "Unnamed in the pinned finalized snapshot";
+  const nameText = row.name && typeof row.name.text === "string" ? row.name.text : "Unnamed";
   const nameMeta = row.name
     ? `<small>FINALIZED SNAPSHOT · ${row.name.namedYear ? `NAMED ${profileValue(row.name.namedYear)}` : "RECORDED NAME"}</small>`
     : `<small>NAME FIELD IS NULL IN THE PINNED FINALIZED SNAPSHOT</small>`;
