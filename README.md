@@ -2,6 +2,8 @@
 
 The MoonCat Knowledge Archive is a small, read-only Vite application for browsing a sibling checkout of [MoonCat KB](https://github.com/mooncatdao/mooncat-kb) (default local path: `../mckb`). It is a human-facing presentation layer: the sibling KB remains canonical, while this app provides guided entrypoints, static search and profile lookup, and a complete technical archive of the publishable KB record set in an LCARS-inspired interface.
 
+**Live site:** https://mooncatdao.github.io/mooncat-kb-library/
+
 ## Local setup
 
 ```sh
